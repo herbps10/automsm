@@ -1,9 +1,9 @@
-estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type) {
+estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = FALSE) {
   n <- nrow(data)
   data0 <- data1 <- data
   data0[[A]] <- 0
   data1[[A]] <- 1
-  pi_hat <- mu0_hat <- mu1_hat <- numeric(n)
+  pi_hat <- mu0_hat <- mu1_hat <- condvar_hat <- numeric(n)
 
   cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
   cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
@@ -36,6 +36,23 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
       pi_hat[validation]  <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
       mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
       mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
+
+      if(estimate_conditional_variance == TRUE) {
+        yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
+        y2 <- (data[[Y]][training] - yhat)^2
+
+        yvar_model <- SuperLearner::SuperLearner(
+          Y = y2,
+          X = data[training, c(X, A), drop = FALSE],
+          SL.library = learners_outcome,
+          family = outcome_family,
+          cvControl = cv_control,
+          env = environment(SuperLearner::SuperLearner)
+        )
+
+        condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
+        condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
+      }
     }
   }
   else {
@@ -67,14 +84,33 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
     pi  = pi_hat,
     mu0 = mu0_hat,
     mu1 = mu1_hat,
-    mu  = mu_hat
+    mu  = mu_hat,
+    condvar = condvar_hat
   )
 }
 
-treatment_effect_modification <- function(data, X, A, Y, formula, loss = loss_squared_error, working_model = working_model_linear, learners_trt = "glm", learners_outcome = "glm", outer_folds = 5, inner_folds = 5, tmle = TRUE, tmle_maxiter = 25, outcome_type = "binomial") {
+treatment_effect_modification <- function(
+    data,
+    X,
+    A,
+    Y,
+    formula,
+    loss = loss_squared_error,
+    working_model = working_model_linear,
+    learners_trt = "glm",
+    learners_outcome = "glm",
+    outer_folds = 5,
+    inner_folds = 5,
+    tmle = TRUE,
+    tmle_maxiter = 25,
+    outcome_type = "binomial",
+    bayes = FALSE,
+    mcmc_draws = 1e3,
+    prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
+) {
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
-  nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type)
+  nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes)
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
   Yt <- torch::torch_tensor(data[[Y]])
@@ -138,17 +174,56 @@ treatment_effect_modification <- function(data, X, A, Y, formula, loss = loss_sq
       K
     }
 
-    # TMLE fluctuation model
-    mse_loss <- nn_mse_loss(reduction = "sum")
-    tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y) {
-      mu  <- mu  + clever$matmul(epsilon)
+    #function dQ_fluctuation_dϵ(ϵ, K, Q)
+    #  Q_normalization = sum(exp.(K * ϵ) .* Q)
+    #  return Q_fluctuation(ϵ, K, Q) .* (K .- Q .* K .* exp.(K * ϵ) ./ Q_normalization)
+    #end
 
+    dQ_fluctuation_depsilon <- \(epsilon, K, Q) {
+      Qn <- exp(K$matmul(epsilon) * Q)$sum()
+      Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn)
+    }
+
+    Q_fluctuation <- \(epsilon, K, Q) {
       Qn <- exp(K$matmul(epsilon) * Q)$sum()
       Q  <- exp(K$matmul(epsilon) * Q) / Qn
+      Q
+    }
 
-      #target <- (mu - Y)$pow(2)$sum()
-      target <- mse_loss(mu, Y)
-      target <- target + log(Q)$sum()
+    # TMLE fluctuation model
+    mse_loss <- nn_mse_loss(reduction = "sum")
+    tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
+      mu  <- mu + clever$matmul(epsilon)
+
+      if(bayes == FALSE) {
+        #target <- (mu - Y)$pow(2)$sum()
+        Q <- Q_fluctuation(epsilon, K, Q)
+        target <- mse_loss(mu, Y)
+        target <- target + log(Q)$sum()
+      }
+      else {
+        Q <- Q_fluctuation(epsilon, K, Q)
+        mu0 <- mu0 + clever0$matmul(epsilon)
+        mu1 <- mu1 + clever1$matmul(epsilon)
+        psi <- mu1 - mu0
+
+        beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
+
+        target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
+
+        # Prior
+        target <- target + prior(as.numeric(beta))
+
+        jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0) +
+          torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
+        target <- target + log(abs(jacobian$det()))
+
+        target <- target + as.numeric(log(Q)$sum())
+
+        ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
+
+        return(ret)
+      }
       target
     }
 
@@ -165,7 +240,7 @@ treatment_effect_modification <- function(data, X, A, Y, formula, loss = loss_sq
 
       K <- calculate_K(Lm(loss, working_model), psi_star, Q_star, beta_star, design_matrix)
       clever <- calculate_clever(Lm(loss, working_model), H, H0, H1, psi_star, Q_star, beta_star, design_matrix)
-      epsilon_star <- tmle_mle(p, tmle_fluctuation_model, mu_star, mu0_star, mu1_star, clever$clever, clever$clever0, clever$clever1, K, Q_star, Yt)
+      epsilon_star <- tmle_mle(p, tmle_fluctuation_model, mu_star, mu0_star, mu1_star, clever$clever, clever$clever0, clever$clever1, K, Q_star, Yt, design_matrix)
 
       m <- max(as.numeric(epsilon_star))
       cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
@@ -190,6 +265,29 @@ treatment_effect_modification <- function(data, X, A, Y, formula, loss = loss_sq
     tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
     tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
     tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
+
+    tmle_beta_samples <- NULL
+    tmle_acc_rate <- NULL
+
+    if(bayes == TRUE) {
+      mcmc <- adaptMCMC::MCMC(\(epsilon) tmle_fluctuation_model(
+        torch::torch_tensor(epsilon),
+        mu_star,
+        mu0_star,
+        mu1_star,
+        clever$clever,
+        clever$clever0,
+        clever$clever1,
+        K,
+        Q_star,
+        Yt,
+        design_matrix,
+        condvar = torch::torch_tensor(nuisance$condvar),
+        bayes = TRUE
+      ), n = mcmc_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
+      tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = mcmc_draws, byrow = TRUE)
+      tmle_acc_rate <- mcmc$acceptance.rate
+    }
   }
 
   res <- list(
@@ -221,7 +319,9 @@ treatment_effect_modification <- function(data, X, A, Y, formula, loss = loss_sq
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       psi   = as.numeric(psi_star),
-      model = as.numeric(working_model(tmle_est, design_matrix))
+      model = as.numeric(working_model(tmle_est, design_matrix)),
+      samples = tmle_beta_samples,
+      acc_rate = tmle_acc_rate
     )
   }
 
