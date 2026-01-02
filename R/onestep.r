@@ -1,5 +1,7 @@
 onestep <- function(Lm, psi, beta, design_matrix, Q, Delta) {
-  n <- nrow(design_matrix)
+  p <- rev(dim(design_matrix))[1]
+  n <- rev(dim(design_matrix))[2]
+
   onestep_eif   <- eif(Lm, psi, beta, design_matrix, Q, Delta)
   onestep_est   <- beta + colMeans(onestep_eif)
   onestep_se    <- apply(onestep_eif, 2, sd) / sqrt(n)
