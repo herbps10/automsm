@@ -10,22 +10,38 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
   outcome_family <- stats::gaussian()
   if(outcome_type == "binomial") outcome_family <- stats::binomial()
 
-  if(outer_folds > 1) {
-    for(fold in seq_along(cv)) {
-      training   <- cv[[fold]]$training_set
-      validation <- cv[[fold]]$validation_set
+  for(fold in seq_along(cv)) {
+    training   <- cv[[fold]]$training_set
+    validation <- cv[[fold]]$validation_set
 
-      pi_model <- SuperLearner::SuperLearner(
-        Y = data[[A]][training],
-        X = data[training, X, drop = FALSE],
-        SL.library = learners_trt,
-        family = "binomial",
-        cvControl = cv_control,
-        env = environment(SuperLearner::SuperLearner)
-      )
+    pi_model <- SuperLearner::SuperLearner(
+      Y = data[[A]][training],
+      X = data[training, X, drop = FALSE],
+      SL.library = learners_trt,
+      family = "binomial",
+      cvControl = cv_control,
+      env = environment(SuperLearner::SuperLearner)
+    )
 
-      mu_model <- SuperLearner::SuperLearner(
-        Y = data[[Y]][training],
+    mu_model <- SuperLearner::SuperLearner(
+      Y = data[[Y]][training],
+      X = data[training, c(X, A), drop = FALSE],
+      SL.library = learners_outcome,
+      family = outcome_family,
+      cvControl = cv_control,
+      env = environment(SuperLearner::SuperLearner)
+    )
+
+    pi_hat[validation]  <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
+    mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
+    mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
+
+    if(estimate_conditional_variance == TRUE) {
+      yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
+      y2 <- (data[[Y]][training] - yhat)^2
+
+      yvar_model <- SuperLearner::SuperLearner(
+        Y = y2,
         X = data[training, c(X, A), drop = FALSE],
         SL.library = learners_outcome,
         family = outcome_family,
@@ -33,51 +49,11 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
         env = environment(SuperLearner::SuperLearner)
       )
 
-      pi_hat[validation]  <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
-      mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
-      mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
-
-      if(estimate_conditional_variance == TRUE) {
-        yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
-        y2 <- (data[[Y]][training] - yhat)^2
-
-        yvar_model <- SuperLearner::SuperLearner(
-          Y = y2,
-          X = data[training, c(X, A), drop = FALSE],
-          SL.library = learners_outcome,
-          family = outcome_family,
-          cvControl = cv_control,
-          env = environment(SuperLearner::SuperLearner)
-        )
-
-        condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
-        condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
-      }
+      condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
+      condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
     }
   }
-  else {
-    pi_model <- SuperLearner::SuperLearner(
-      Y = data[[A]],
-      X = data[, X, drop = FALSE],
-      SL.library = learners_trt,
-      cvControl = cv_control,
-      family = "binomial",
-      env = environment(SuperLearner::SuperLearner)
-    )
 
-    mu_model <- SuperLearner::SuperLearner(
-      Y = data[[Y]],
-      X = data[, c(X, A), drop = FALSE],
-      SL.library = learners_outcome,
-      family = outcome_family,
-      cvControl = cv_control,
-      env = environment(SuperLearner::SuperLearner)
-    )
-
-    pi_hat  <- SuperLearner::predict.SuperLearner(pi_model, newdata = data, onlySL = TRUE)$pred
-    mu0_hat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0, onlySL = TRUE)$pred
-    mu1_hat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1, onlySL = TRUE)$pred
-  }
   mu_hat <- ifelse(data[[A]] == 1, mu1_hat, mu0_hat)
 
   list(

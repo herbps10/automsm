@@ -21,26 +21,44 @@ estimate_categorical_dose_response_nuisance <- function(
   outcome_family <- stats::gaussian()
   if(outcome_type == "binomial") outcome_family <- stats::binomial()
 
-  if(outer_folds > 1) {
-    for(fold in seq_along(cv)) {
-      training   <- cv[[fold]]$training_set
-      validation <- cv[[fold]]$validation_set
+  for(fold in seq_along(cv)) {
+    training   <- cv[[fold]]$training_set
+    validation <- cv[[fold]]$validation_set
 
-      for(a_index in seq_along(As)) {
-        pi_model <- SuperLearner::SuperLearner(
-          Y = as.numeric(data[[A]][training] == As[a_index]),
-          X = data[training, X, drop = FALSE],
-          SL.library = learners_trt,
-          family = "binomial",
-          cvControl = cv_control,
-          env = environment(SuperLearner::SuperLearner)
-        )
+    for(a_index in seq_along(As)) {
+      pi_model <- SuperLearner::SuperLearner(
+        Y = as.numeric(data[[A]][training] == As[a_index]),
+        X = data[training, X, drop = FALSE],
+        SL.library = learners_trt,
+        family = "binomial",
+        cvControl = cv_control,
+        env = environment(SuperLearner::SuperLearner)
+      )
 
-        pi_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
-      }
+      pi_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
+    }
 
-      mu_model <- SuperLearner::SuperLearner(
-        Y = data[[Y]][training],
+    mu_model <- SuperLearner::SuperLearner(
+      Y = data[[Y]][training],
+      X = data[training, c(X, A), drop = FALSE],
+      SL.library = learners_outcome,
+      family = outcome_family,
+      cvControl = cv_control,
+      env = environment(SuperLearner::SuperLearner)
+    )
+
+    for(a_index in seq_along(As)) {
+      newdata <- data[validation, c(X, A)]
+      newdata[[A]] <- As[a_index]
+      mu_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(mu_model, newdata = newdata, onlySL = TRUE)$pred
+    }
+
+    if(estimate_conditional_variance == TRUE) {
+      yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
+      y2 <- (data[[Y]][training] - yhat)^2
+
+      yvar_model <- SuperLearner::SuperLearner(
+        Y = y2,
         X = data[training, c(X, A), drop = FALSE],
         SL.library = learners_outcome,
         family = outcome_family,
@@ -48,28 +66,8 @@ estimate_categorical_dose_response_nuisance <- function(
         env = environment(SuperLearner::SuperLearner)
       )
 
-      for(a_index in seq_along(As)) {
-        newdata <- data[validation, c(X, A)]
-        newdata[[A]] <- As[a_index]
-        mu_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(mu_model, newdata = newdata, onlySL = TRUE)$pred
-      }
-
-      if(estimate_conditional_variance == TRUE) {
-        yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
-        y2 <- (data[[Y]][training] - yhat)^2
-
-        yvar_model <- SuperLearner::SuperLearner(
-          Y = y2,
-          X = data[training, c(X, A), drop = FALSE],
-          SL.library = learners_outcome,
-          family = outcome_family,
-          cvControl = cv_control,
-          env = environment(SuperLearner::SuperLearner)
-        )
-
-        condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
-        condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
-      }
+      condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
+      condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
     }
   }
 
