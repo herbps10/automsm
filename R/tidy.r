@@ -1,3 +1,4 @@
+#' @importFrom generics tidy
 #' @export
 tidy.targeted_msm <- function(x, ...) {
   results <- tibble::tibble(
