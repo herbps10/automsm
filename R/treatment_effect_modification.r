@@ -89,6 +89,27 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
   )
 }
 
+#' Estimate Marginal Structural Model for Treatment Effect Modifiers
+#'
+#' @param data data frame
+#' @param X covariate columns
+#' @param A treatment column
+#' @param Y outcome column
+#' @param formula marginal structural model design matrix formula
+#' @param loss marginal structural model loss function
+#' @param working model marginal structural model working model
+#' @param learners_trt SuperLearner libraries for estimating propensity score
+#' @param learners_outcome SuperLearner libraries for estimating outcome regression
+#' @param outer_folds number of folds in outer cross-fitting loop
+#' @param inner_folds number of folds for inner SuperLearner cross-validation within each outer cross-fitting loop
+#' @param outcome_type outcome type ("continuous" or "binomial")
+#' @param tmle whether to run TMLE estimator (TRUE/FALSE)
+#' @param tmle_maxiter maximum number of TMLE iterations
+#' @param tmle_linear whether to use linear TMLE fluctuation model (TRUE) or logistic fluctuation model (FALSE)
+#' @param bayes whether to run Bayesian TMLE estimator
+#' @param bayes_draws number of MCMC samples
+#' @param bayes_prior prior to apply to marginal structural model parameters
+#'
 #' @export
 treatment_effect_modification <- function(
     data,
@@ -97,24 +118,25 @@ treatment_effect_modification <- function(
     Y,
     formula,
     loss = loss_squared_error,
-    working_model = working_model_linear,
-    learners_trt = "glm",
-    learners_outcome = "glm",
+    working_model = working_model_tmle_linear,
+    learners_trt = "SL.glm",
+    learners_outcome = "SL.glm",
     outer_folds = 5,
     inner_folds = 5,
+    outcome_type = "binomial",
     tmle = TRUE,
     tmle_maxiter = 25,
-    outcome_type = "binomial",
+    tmle_linear = TRUE,
     bayes = FALSE,
-    mcmc_draws = 1e3,
-    prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
+    bayes_draws = 1e3,
+    bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
 ) {
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
   nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes)
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
-  Yt <- torch::torch_tensor(data[[Y]])
+  Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
 
   mat <- model.matrix(formula, data = data)
   terms <- colnames(mat)
@@ -192,20 +214,37 @@ treatment_effect_modification <- function(
     }
 
     # TMLE fluctuation model
-    mse_loss <- nn_mse_loss(reduction = "sum")
+    if(tmle_linear == TRUE) {
+      tmle_loss <- nn_mse_loss(reduction = "sum")
+    }
+    else {
+      tmle_loss <- nn_bce_loss(reduction = "sum")
+    }
+    bernoulli_loss <- nn_bce_loss()
     tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
-      mu  <- mu + clever$matmul(epsilon)
+      if(tmle_linear == TRUE) {
+        mu <- mu + clever$matmul(epsilon)
+      }
+      else {
+        mu <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
+      }
 
       if(bayes == FALSE) {
         #target <- (mu - Y)$pow(2)$sum()
         Q <- Q_fluctuation(epsilon, K, Q)
-        target <- mse_loss(mu, Y)
+        target <- tmle_loss(mu, Y)
         target <- target + log(Q)$sum()
       }
       else {
         Q <- Q_fluctuation(epsilon, K, Q)
-        mu0 <- mu0 + clever0$matmul(epsilon)
-        mu1 <- mu1 + clever1$matmul(epsilon)
+        if(tmle_linear == TRUE) {
+          mu0 <- mu0 + clever0$matmul(epsilon)
+          mu1 <- mu1 + clever1$matmul(epsilon)
+        }
+        else {
+          mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
+          mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
+        }
         psi <- mu1 - mu0
 
         beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
@@ -213,11 +252,18 @@ treatment_effect_modification <- function(
         target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
 
         # Prior
-        target <- target + prior(as.numeric(beta))
+        target <- target + bayes_prior(as.numeric(beta))
 
-        jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0) +
-          torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
+        if(tmle_linear == TRUE) {
+          jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0)
+        }
+        else {
+          jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
+        }
+        jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
         target <- target + log(abs(jacobian$det()))
+
+        f <- \(epsilon)  tmle_fluctuation_model(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm, condvar, bayes)
 
         target <- target + as.numeric(log(Q)$sum())
 
@@ -246,9 +292,16 @@ treatment_effect_modification <- function(
       m <- max(as.numeric(epsilon_star))
       cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
-      mu_star  <- mu_star  + clever$clever$matmul(epsilon_star)
-      mu0_star <- mu0_star + clever$clever0$matmul(epsilon_star)
-      mu1_star <- mu1_star + clever$clever1$matmul(epsilon_star)
+      if(tmle_linear == TRUE) {
+        mu_star  <- mu_star  + clever$clever$matmul(epsilon_star)
+        mu0_star <- mu0_star + clever$clever0$matmul(epsilon_star)
+        mu1_star <- mu1_star + clever$clever1$matmul(epsilon_star)
+      }
+      else {
+        mu_star  <- torch::torch_sigmoid(mu_star$logit()  + clever$clever$matmul(epsilon_star))
+        mu0_star <- torch::torch_sigmoid(mu0_star$logit() + clever$clever0$matmul(epsilon_star))
+        mu1_star <- torch::torch_sigmoid(mu1_star$logit() + clever$clever1$matmul(epsilon_star))
+      }
 
       Qn <- exp(K$matmul(epsilon_star) * Q_star)$sum()
       Q_star  <- exp(K$matmul(epsilon_star) * Q_star) / Qn
@@ -285,8 +338,8 @@ treatment_effect_modification <- function(
         design_matrix,
         condvar = torch::torch_tensor(nuisance$condvar),
         bayes = TRUE
-      ), n = mcmc_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
-      tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = mcmc_draws, byrow = TRUE)
+      ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
+      tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
       tmle_acc_rate <- mcmc$acceptance.rate
     }
   }
