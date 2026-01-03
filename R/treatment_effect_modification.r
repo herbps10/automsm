@@ -194,21 +194,22 @@ treatment_effect_modification <- function(
       tmle_loss <- nn_mse_loss(reduction = "sum")
     }
     else {
-      tmle_loss <- nn_bce_loss(reduction = "sum")
+      tmle_loss <- nn_bce_with_logits_loss(reduction = "sum")
     }
     bernoulli_loss <- nn_bce_loss()
     tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
       if(tmle_linear == TRUE) {
         mu <- mu + clever$matmul(epsilon)
+        target <- tmle_loss(mu, Y)
       }
       else {
-        mu <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
+        mu_logit <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
+        target <- tmle_loss(mu_logit, Y)
       }
 
       if(bayes == FALSE) {
         #target <- (mu - Y)$pow(2)$sum()
         Q <- Q_fluctuation(epsilon, K, Q)
-        target <- tmle_loss(mu, Y)
         target <- target + log(Q)$sum()
       }
       else {
