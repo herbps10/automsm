@@ -56,11 +56,11 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
   }
 
   if(outcome_type == "binomial") {
-    mu0_hat[mu0_hat >= 1] <- 1 - epsilon
-    mu0_hat[mu0_hat <= 0] <- epsilon
+    mu0_hat[mu0_hat >= 1 - epsilon] <- 1 - epsilon
+    mu0_hat[mu0_hat <= epsilon] <- epsilon
 
-    mu1_hat[mu1_hat >= 1] <- 1 - epsilon
-    mu1_hat[mu1_hat <= 0] <- epsilon
+    mu1_hat[mu1_hat >= 1 - epsilon] <- 1 - epsilon
+    mu1_hat[mu1_hat <= epsilon] <- epsilon
   }
 
   mu_hat <- ifelse(data[[A]] == 1, mu1_hat, mu0_hat)
@@ -268,6 +268,8 @@ treatment_effect_modification <- function(
     beta_star <- beta
     epsilon_star <- rep(0, p)
 
+    converged <- TRUE
+
     for(tmle_iter in 1:tmle_maxiter) {
       psi_star <- (mu1_star - mu0_star)$detach()$clone()
       psi_star$requires_grad_(TRUE)
@@ -275,6 +277,12 @@ treatment_effect_modification <- function(
       K <- calculate_K(Lm(loss, working_model), psi_star, Q_star, beta_star, design_matrix)
       clever <- calculate_clever(Lm(loss, working_model), H, H0, H1, psi_star, Q_star, beta_star, design_matrix)
       epsilon_star <- tmle_mle(p, tmle_fluctuation_model, mu_star, mu0_star, mu1_star, clever$clever, clever$clever0, clever$clever1, K, Q_star, Yt, design_matrix)
+
+      if(any(is.nan(as.numeric(epsilon_star)))) {
+        warning("TMLE failed to converge.")
+        converged <- FALSE
+        break
+      }
 
       m <- max(as.numeric(epsilon_star))
       cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
@@ -301,11 +309,15 @@ treatment_effect_modification <- function(
       }
     }
 
-    tmle_est   <- B(Lm(loss, working_model), psi_star, design_matrix, Q_star)
-    tmle_eif   <- eif(Lm(loss, working_model), psi_star, tmle_est, design_matrix, Q_star, Delta(H, Yt, mu_star))
-    tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
-    tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
-    tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
+    tmle_est <- tmle_se <- tmle_lower <- tmle_upper <- rep(NA, p)
+    tmle_eif <- matrix(NA, ncol = p, nrow = n)
+    if(converged == TRUE) {
+      tmle_est   <- B(Lm(loss, working_model), psi_star, design_matrix, Q_star)
+      tmle_eif   <- eif(Lm(loss, working_model), psi_star, tmle_est, design_matrix, Q_star, Delta(H, Yt, mu_star))
+      tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
+      tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
+      tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
+    }
 
     tmle_beta_samples <- NULL
     tmle_acc_rate <- NULL
