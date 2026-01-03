@@ -89,6 +89,7 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
   )
 }
 
+#' @export
 treatment_effect_modification <- function(
     data,
     X,

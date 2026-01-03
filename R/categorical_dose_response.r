@@ -88,6 +88,7 @@ estimate_categorical_dose_response_nuisance <- function(
   )
 }
 
+#' @export
 categorical_dose_response <- function(
     data,
     X,
@@ -189,7 +190,7 @@ categorical_dose_response <- function(
         for(k in 1:K) {
           x <- torch::torch_zeros(K)
           x[k] <- HA[i, k]
-          cleverA[k, i, ]  <- torch::torch_reshape(d$matmul(x), p)
+          cleverA[k, i, ] <- torch::torch_reshape(d$matmul(x), p)
         }
       }
       list(
@@ -238,7 +239,7 @@ categorical_dose_response <- function(
         #for(k in 1:K) {
           #mu_a[, k] <- mu_a[, k] + clever$cleverA[k, , ]$matmul(epsilon_star)
         #}
-        mu_a <- mu_a + clever$cleverA$matmul(epsilon_star)$transpose(1, 2)
+        mu_a <- mu_a + clever$cleverA$matmul(epsilon)$transpose(1, 2)
 
         beta <- B(combined_loss, mu_a, design_matrix, Q)
 
@@ -246,10 +247,9 @@ categorical_dose_response <- function(
 
         # Prior
         target <- target + prior(as.numeric(beta))
-
         jacobian <- torch::torch_zeros(c(p, p))
+        J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
         for(k in 1:K) {
-          J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
           jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul(clever$cleverA[k,])
         }
         jacobian <- jacobian + torch::torch_transpose(dB_dQ(combined_loss, psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
@@ -319,7 +319,6 @@ categorical_dose_response <- function(
         condvar = torch::torch_tensor(nuisance$condvar),
         bayes = TRUE
       ), n = mcmc_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
-      browser()
       tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = mcmc_draws, byrow = TRUE)
       tmle_acc_rate <- mcmc$acceptance.rate
     }
@@ -352,7 +351,9 @@ categorical_dose_response <- function(
       se    = as.numeric(tmle_se),
       lower = as.numeric(tmle_lower),
       upper = as.numeric(tmle_upper),
-      eif   = tmle_eif
+      eif   = tmle_eif,
+      samples = tmle_beta_samples,
+      acc_rate = tmle_acc_rate
     )
   }
 
