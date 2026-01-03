@@ -213,7 +213,7 @@ treatment_effect_modification <- function(
         target <- tmle_loss(mu, Y)
       }
       else {
-        mu_logit <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
+        mu_logit <- mu$logit() + clever$matmul(epsilon)
         target <- tmle_loss(mu_logit, Y)
       }
 
