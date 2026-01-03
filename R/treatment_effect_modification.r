@@ -1,4 +1,4 @@
-estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = FALSE) {
+estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = FALSE, epsilon = 1e-5) {
   n <- nrow(data)
   data0 <- data1 <- data
   data0[[A]] <- 0
@@ -36,6 +36,7 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
     mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
     mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
 
+
     if(estimate_conditional_variance == TRUE) {
       yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
       y2 <- (data[[Y]][training] - yhat)^2
@@ -52,6 +53,14 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
       condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
       condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
     }
+  }
+
+  if(outcome_type == "binomial") {
+    mu0_hat[mu0_hat >= 1] <- 1 - epsilon
+    mu0_hat[mu0_hat <= 0] <- epsilon
+
+    mu1_hat[mu1_hat >= 1] <- 1 - epsilon
+    mu1_hat[mu1_hat <= 0] <- epsilon
   }
 
   mu_hat <- ifelse(data[[A]] == 1, mu1_hat, mu0_hat)
@@ -105,11 +114,12 @@ treatment_effect_modification <- function(
     tmle_linear = TRUE,
     bayes = FALSE,
     bayes_draws = 1e3,
-    bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
+    bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
+    epsilon = 1e-5
 ) {
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
-  nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes)
+  nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes, epsilon = epsilon)
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
