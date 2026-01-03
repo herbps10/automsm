@@ -372,7 +372,6 @@ treatment_effect_modification <- function(
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       psi   = as.numeric(psi_star),
-      model = as.numeric(working_model(tmle_est, design_matrix)),
       samples = tmle_beta_samples,
       acc_rate = tmle_acc_rate
     )
