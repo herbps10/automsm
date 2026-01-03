@@ -94,7 +94,7 @@ treatment_effect_modification <- function(
     Y,
     formula,
     loss = loss_squared_error,
-    working_model = working_model_tmle_linear,
+    working_model = working_model_linear,
     learners_trt = "SL.glm",
     learners_outcome = "SL.glm",
     outer_folds = 5,
