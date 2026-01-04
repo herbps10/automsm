@@ -1,9 +1,9 @@
 Lm <- function(loss, working_model) function(t, beta, X) loss(t, working_model(beta, X))
 
 # Gradient of beta -> Lm(t, beta, X)
-dL <- function(Lm, t, beta, X) {
+dL <- function(Lm, t, beta, X, weight = 1) {
   beta$grad <- NULL
-  l <- Lm(t, beta, X)
+  l <- Lm(t, beta, X)$mul(weight)$sum()
   torch::autograd_grad(l, list(beta), create_graph = TRUE, retain_graph = TRUE)
 }
 
@@ -41,37 +41,25 @@ B <- function(Lm, psi, design_matrix, Q) {
   p <- rev(dim(design_matrix))[1]
   beta <- torch_tensor(rep(0, p), requires_grad = TRUE)
   optimizer <- torch::optim_lbfgs(beta)
-  for(iter in 1:2) {
-    optimizer$step(\() {
-      optimizer$zero_grad()
-      value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
-      #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
-      value$backward(retain_graph = TRUE)
-      value
-    })
-  }
+  optimizer$step(\() {
+    optimizer$zero_grad()
+    value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
+    #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
+    value$backward(retain_graph = TRUE)
+    value
+  })
   optimizer$zero_grad()
   beta
 }
 
 objective <- function(Lm, psi, Q, design_matrix, beta) {
-  p <- rev(dim(design_matrix))[1]
-  n <- rev(dim(design_matrix))[2]
-  sum <- torch_zeros(c(1, 1))
-  for(i in 1:n) {
-    if(length(dim(design_matrix)) == 3) {
-      sum <- sum + Q[i] * dL(Lm, psi[i, drop = FALSE], beta, design_matrix[i, ])[[1]]
-    }
-    else {
-      sum <- sum + Q[i] * dL(Lm, psi[i], beta, design_matrix[i, ])[[1]]
-    }
-  }
-  sum
+  dL(Lm, psi, beta, design_matrix, weight = Q)[[1]]
 }
 
 dobjective_dpsi <- function(Lm, psi, Q, design_matrix, beta) {
   p <- rev(dim(design_matrix))[1]
   n <- rev(dim(design_matrix))[2]
+
   if(length(dim(design_matrix)) == 3) {
     K <- dim(design_matrix)[1]
     jacob <- torch_zeros(c(K, n, p))
@@ -80,10 +68,9 @@ dobjective_dpsi <- function(Lm, psi, Q, design_matrix, beta) {
     }
   }
   else {
-    jacob <- torch_zeros(c(n, p))
-    for(i in 1:n) {
-      jacob[i, ] <- (Q[i] * grad_dL(Lm, psi[i], beta, design_matrix[i, ]))$reshape(p)
-    }
+    obj <- objective(Lm, psi, Q, design_matrix, beta)
+    r <- map(1:p, \(index) autograd_grad(obj[index], psi, retain_graph = TRUE)[[1]]$reshape(c(n, 1)))
+    jacob <- torch::torch_cat(r, dim = 2)
   }
   jacob
 }
@@ -91,31 +78,17 @@ dobjective_dpsi <- function(Lm, psi, Q, design_matrix, beta) {
 dobjective_dQ <- function(Lm, psi, Q, design_matrix, beta) {
   p <- rev(dim(design_matrix))[1]
   n <- rev(dim(design_matrix))[2]
-  jacob <- torch_zeros(c(n, p))
-  for(i in 1:n) {
-    if(length(dim(design_matrix)) == 3) {
-      jacob[i, ] <- dL(Lm, psi[i, drop = FALSE], beta, design_matrix[, i, drop = FALSE])[[1]]
-    }
-    else {
-      jacob[i, ] <- dL(Lm, psi[i], beta, design_matrix[i, ])[[1]]
-    }
-  }
-  jacob
+
+  obj <- objective(Lm, psi, Q, design_matrix, beta)
+  r <- map(1:p, \(index) autograd_grad(obj[index], Q, retain_graph = TRUE)[[1]]$reshape(c(n, 1)))
+  torch::torch_cat(r, dim = 2)
 }
 
 dobjective_dbeta <- function(Lm, psi, Q, design_matrix, beta) {
   p <- rev(dim(design_matrix))[1]
-  n <- rev(dim(design_matrix))[2]
-  jacob <- torch_zeros(c(p, p))
-  for(i in 1:n) {
-    if(length(dim(design_matrix)) == 3) {
-      jacob <- jacob + Q[i] * dL_dbeta(Lm, psi[i, drop = FALSE], beta, design_matrix[, i, drop = FALSE], p)
-    }
-    else {
-      jacob <- jacob + Q[i] * dL_dbeta(Lm, psi[i], beta, design_matrix[i, ], p)
-    }
-  }
-  jacob
+  obj <- objective(Lm, psi, Q, design_matrix, beta)
+  r <- map(1:p, \(index) autograd_grad(obj[index], beta, retain_graph = TRUE)[[1]]$reshape(c(p, 1)))
+  torch::torch_cat(r, dim = 2)
 }
 
 dB_dpsi <- function(Lm, psi, Q, design_matrix, beta) {

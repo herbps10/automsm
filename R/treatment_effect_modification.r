@@ -242,7 +242,7 @@ treatment_effect_modification <- function(
 
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
-#
+
         if(tmle_linear == TRUE) {
           jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0)
         }
