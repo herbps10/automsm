@@ -223,12 +223,14 @@ treatment_effect_modification <- function(
         target <- target + log(Q)$sum()
       }
       else {
-        Q <- Q_fluctuation(epsilon, K, Q)
+        #Q <- Q_fluctuation(epsilon, K, Q)
         if(tmle_linear == TRUE) {
+          mu  <- mu  + clever$matmul(epsilon)
           mu0 <- mu0 + clever0$matmul(epsilon)
           mu1 <- mu1 + clever1$matmul(epsilon)
         }
         else {
+          mu  <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
           mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
           mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
         }
@@ -240,7 +242,7 @@ treatment_effect_modification <- function(
 
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
-
+#
         if(tmle_linear == TRUE) {
           jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0)
         }
@@ -249,8 +251,6 @@ treatment_effect_modification <- function(
         }
         jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
         target <- target + log(abs(jacobian$det()))
-
-        f <- \(epsilon)  tmle_fluctuation_model(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm, condvar, bayes)
 
         target <- target + as.numeric(log(Q)$sum())
 
