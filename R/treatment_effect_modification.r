@@ -230,6 +230,7 @@ treatment_effect_modification <- function(
           mu1 <- mu1 + clever1$matmul(epsilon)
         }
         else {
+          mu_logit <- mu$logit() + clever$matmul(epsilon)
           mu  <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
           mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
           mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
@@ -238,7 +239,12 @@ treatment_effect_modification <- function(
 
         beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
 
-        target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
+        if(tmle_linear == TRUE) {
+          target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
+        }
+        else {
+          target <- -tmle_loss(mu_logit, Y)
+        }
 
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
