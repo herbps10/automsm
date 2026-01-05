@@ -41,14 +41,16 @@ B <- function(Lm, psi, design_matrix, Q) {
   p <- rev(dim(design_matrix))[1]
   beta <- torch_tensor(rep(0, p), requires_grad = TRUE)
   optimizer <- torch::optim_lbfgs(beta)
-  optimizer$step(\() {
+  for(iter in 1:2) {
+    optimizer$step(\() {
+      optimizer$zero_grad()
+      value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
+      #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
+      value$backward(retain_graph = TRUE)
+      value
+    })
     optimizer$zero_grad()
-    value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
-    #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
-    value$backward(retain_graph = TRUE)
-    value
-  })
-  optimizer$zero_grad()
+  }
   beta
 }
 

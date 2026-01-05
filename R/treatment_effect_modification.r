@@ -183,11 +183,6 @@ treatment_effect_modification <- function(
       K
     }
 
-    #function dQ_fluctuation_dϵ(ϵ, K, Q)
-    #  Q_normalization = sum(exp.(K * ϵ) .* Q)
-    #  return Q_fluctuation(ϵ, K, Q) .* (K .- Q .* K .* exp.(K * ϵ) ./ Q_normalization)
-    #end
-
     dQ_fluctuation_depsilon <- \(epsilon, K, Q) {
       Qn <- exp(K$matmul(epsilon) * Q)$sum()
       Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn)
@@ -208,22 +203,21 @@ treatment_effect_modification <- function(
     }
 
     tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
-
       # Fluctuate covariate distribution
       Q <- Q_fluctuation(epsilon, K, Q)
 
       # Fluctuate outcome regression
       if(tmle_linear == TRUE) {
-        mu <- mu + clever$matmul(epsilon)
+        mu  <- mu  + clever$matmul(epsilon)
         mu0 <- mu0 + clever0$matmul(epsilon)
         mu1 <- mu1 + clever1$matmul(epsilon)
         target <- tmle_loss(mu, Y)
       }
       else {
         mu_logit <- mu$logit() + clever$matmul(epsilon)
-        mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
-        mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
-        target <- tmle_loss(mu_logit, Y)
+        mu0      <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
+        mu1      <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
+        target   <- tmle_loss(mu_logit, Y)
       }
 
       # Combined loss function
@@ -234,7 +228,6 @@ treatment_effect_modification <- function(
       }
       else {
         psi <- mu1 - mu0
-
         beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
 
         if(tmle_linear == TRUE) {
@@ -246,7 +239,6 @@ treatment_effect_modification <- function(
 
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
-
         # Jacobian adjustment
         jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)
         if(tmle_linear == TRUE) {
@@ -301,8 +293,7 @@ treatment_effect_modification <- function(
         mu1_star <- torch::torch_sigmoid(mu1_star$logit() + clever$clever1$matmul(epsilon_star))
       }
 
-      Qn <- exp(K$matmul(epsilon_star) * Q_star)$sum()
-      Q_star  <- exp(K$matmul(epsilon_star) * Q_star) / Qn
+      Q_star  <- Q_fluctuation(epsilon_star, K, Q_star)
 
       beta_star <- B(Lm(loss, working_model), psi_star, design_matrix, Q_star)$detach()$clone()
       beta_star$requires_grad_(TRUE)
@@ -331,7 +322,8 @@ treatment_effect_modification <- function(
 
       for(chain in 1:4) {
         cat("Chain: ", chain, "\n\n")
-        mcmc <- adaptMCMC::MCMC(\(epsilon) tmle_fluctuation_model(
+
+        log_dens <- \(epsilon) tmle_fluctuation_model(
           torch::torch_tensor(epsilon),
           mu_star,
           mu0_star,
@@ -345,7 +337,16 @@ treatment_effect_modification <- function(
           design_matrix,
           condvar = torch::torch_tensor(nuisance$condvar),
           bayes = TRUE
-        ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-3, p))
+        )
+
+        mcmc <- adaptMCMC::MCMC(
+          log_dens,
+          n = bayes_draws,
+          init = as.numeric(epsilon_star),
+          adapt = TRUE,
+          acc.rate = 0.3,
+          scale = rep(1e-3, p)
+        )
 
         tmle_beta_samples[chain, ,] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
         tmle_acc_rate <- tmle_acc_rate + 1/4 * mcmc$acceptance.rate
