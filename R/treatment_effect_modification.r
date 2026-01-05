@@ -6,7 +6,9 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
   pi_hat <- mu0_hat <- mu1_hat <- condvar_hat <- numeric(n)
 
   cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
+  if(outer_folds == 1) cv[[1]]$training_set <- cv[[1]]$validation_set
   cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
+
   outcome_family <- stats::gaussian()
   if(outcome_type == "binomial") outcome_family <- stats::binomial()
 
