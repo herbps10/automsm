@@ -223,7 +223,8 @@ treatment_effect_modification <- function(
         target <- target + log(Q)$sum()
       }
       else {
-        #Q <- Q_fluctuation(epsilon, K, Q)
+        Q <- Q_fluctuation(epsilon, K, Q)
+
         if(tmle_linear == TRUE) {
           mu  <- mu  + clever$matmul(epsilon)
           mu0 <- mu0 + clever0$matmul(epsilon)
