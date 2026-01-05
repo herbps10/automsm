@@ -206,8 +206,9 @@ treatment_effect_modification <- function(
     else {
       tmle_loss <- nn_bce_with_logits_loss(reduction = "sum")
     }
-    bernoulli_loss <- nn_bce_loss()
+
     tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
+      Q <- Q_fluctuation(epsilon, K, Q)
       if(tmle_linear == TRUE) {
         mu <- mu + clever$matmul(epsilon)
         target <- tmle_loss(mu, Y)
@@ -217,22 +218,14 @@ treatment_effect_modification <- function(
         target <- tmle_loss(mu_logit, Y)
       }
 
-      if(bayes == FALSE) {
-        #target <- (mu - Y)$pow(2)$sum()
-        Q <- Q_fluctuation(epsilon, K, Q)
-        target <- target + log(Q)$sum()
-      }
-      else {
+      if(bayes == TRUE) {
         Q <- Q_fluctuation(epsilon, K, Q)
 
         if(tmle_linear == TRUE) {
-          mu  <- mu  + clever$matmul(epsilon)
           mu0 <- mu0 + clever0$matmul(epsilon)
           mu1 <- mu1 + clever1$matmul(epsilon)
         }
         else {
-          mu_logit <- mu$logit() + clever$matmul(epsilon)
-          mu  <- torch::torch_sigmoid(mu$logit() + clever$matmul(epsilon))
           mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
           mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
         }
@@ -244,12 +237,13 @@ treatment_effect_modification <- function(
           target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
         }
         else {
-          target <- -tmle_loss(mu_logit, Y)
+          target <- -as.numeric(target)
         }
+
+        target <- target + as.numeric(log(Q)$sum())
 
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
-
         if(tmle_linear == TRUE) {
           jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0)
         }
@@ -258,8 +252,6 @@ treatment_effect_modification <- function(
         }
         jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
         target <- target + log(abs(jacobian$det()))
-
-        target <- target + as.numeric(log(Q)$sum())
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
 
@@ -344,7 +336,7 @@ treatment_effect_modification <- function(
         design_matrix,
         condvar = torch::torch_tensor(nuisance$condvar),
         bayes = TRUE
-      ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
+      ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-3, p))
       tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
       tmle_acc_rate <- mcmc$acceptance.rate
     }
