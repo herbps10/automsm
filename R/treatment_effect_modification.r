@@ -208,56 +208,61 @@ treatment_effect_modification <- function(
     }
 
     tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
+
+      # Fluctuate covariate distribution
       Q <- Q_fluctuation(epsilon, K, Q)
+
+      # Fluctuate outcome regression
       if(tmle_linear == TRUE) {
         mu <- mu + clever$matmul(epsilon)
+        mu0 <- mu0 + clever0$matmul(epsilon)
+        mu1 <- mu1 + clever1$matmul(epsilon)
         target <- tmle_loss(mu, Y)
       }
       else {
         mu_logit <- mu$logit() + clever$matmul(epsilon)
+        mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
+        mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
         target <- tmle_loss(mu_logit, Y)
       }
 
-      if(bayes == TRUE) {
-        Q <- Q_fluctuation(epsilon, K, Q)
+      # Combined loss function
+      target <- target - as.numeric(log(Q)$sum())
 
-        if(tmle_linear == TRUE) {
-          mu0 <- mu0 + clever0$matmul(epsilon)
-          mu1 <- mu1 + clever1$matmul(epsilon)
-        }
-        else {
-          mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
-          mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
-        }
+      if(bayes == FALSE) {
+        return(target)
+      }
+      else {
         psi <- mu1 - mu0
 
         beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
 
         if(tmle_linear == TRUE) {
-          target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
+          target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(log(Q)$sum())
         }
         else {
           target <- -as.numeric(target)
         }
 
-        target <- target + as.numeric(log(Q)$sum())
-
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
+
+        # Jacobian adjustment
+        jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)
         if(tmle_linear == TRUE) {
-          jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 - clever0)
+          jacobian <- jacobian$matmul(clever1 - clever0)
         }
         else {
-          jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
+          jacobian <- jacobian$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
         }
         jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
+
         target <- target + log(abs(jacobian$det()))
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
 
         return(ret)
       }
-      target
     }
 
     Q_star <- Q
