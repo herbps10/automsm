@@ -115,11 +115,14 @@ treatment_effect_modification <- function(
     bayes = FALSE,
     bayes_draws = 1e3,
     bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
-    epsilon = 1e-5
+    epsilon = 1e-5,
+    nuisance = NULL
 ) {
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
-  nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes, epsilon = epsilon)
+  if(is.null(nuisance)) {
+    nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes, epsilon = epsilon)
+  }
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
