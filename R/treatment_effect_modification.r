@@ -256,7 +256,6 @@ treatment_effect_modification <- function(
           jacobian <- jacobian$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
         }
         jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
-
         target <- target + log(abs(jacobian$det()))
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
@@ -327,23 +326,31 @@ treatment_effect_modification <- function(
     tmle_acc_rate <- NULL
 
     if(bayes == TRUE) {
-      mcmc <- adaptMCMC::MCMC(\(epsilon) tmle_fluctuation_model(
-        torch::torch_tensor(epsilon),
-        mu_star,
-        mu0_star,
-        mu1_star,
-        clever$clever,
-        clever$clever0,
-        clever$clever1,
-        K,
-        Q_star,
-        Yt,
-        design_matrix,
-        condvar = torch::torch_tensor(nuisance$condvar),
-        bayes = TRUE
-      ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-3, p))
-      tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
-      tmle_acc_rate <- mcmc$acceptance.rate
+      tmle_beta_samples <- array(dim = c(4, bayes_draws, p))
+      tmle_acc_rate <- 0
+
+      for(chain in 1:4) {
+        cat("Chain: ", chain, "\n\n")
+        mcmc <- adaptMCMC::MCMC(\(epsilon) tmle_fluctuation_model(
+          torch::torch_tensor(epsilon),
+          mu_star,
+          mu0_star,
+          mu1_star,
+          clever$clever,
+          clever$clever0,
+          clever$clever1,
+          K,
+          Q_star,
+          Yt,
+          design_matrix,
+          condvar = torch::torch_tensor(nuisance$condvar),
+          bayes = TRUE
+        ), n = bayes_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-3, p))
+
+        tmle_beta_samples[chain, ,] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
+        tmle_acc_rate <- tmle_acc_rate + 1/4 * mcmc$acceptance.rate
+      }
+
     }
   }
 

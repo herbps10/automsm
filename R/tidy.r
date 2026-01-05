@@ -24,10 +24,10 @@ tidy.targeted_msm <- function(x, ...) {
       results <- rbind(results, tibble::tibble(
         estimator = "bayestmle",
         term      = x$terms,
-        estimate  = as.numeric(apply(x$tmle$samples, 2, median)),
-        conf.low  = as.numeric(apply(x$tmle$samples, 2, quantile, 0.025)),
-        conf.high = as.numeric(apply(x$tmle$samples, 2, quantile, 0.975)),
-        std.error = as.numeric(apply(x$tmle$samples, 2, sd))
+        estimate  = as.numeric(apply(x$tmle$samples, 3, median)),
+        conf.low  = as.numeric(apply(x$tmle$samples, 3, quantile, 0.025)),
+        conf.high = as.numeric(apply(x$tmle$samples, 3, quantile, 0.975)),
+        std.error = as.numeric(apply(x$tmle$samples, 3, sd))
       ))
     }
   }
