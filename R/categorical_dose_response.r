@@ -8,7 +8,8 @@ estimate_categorical_dose_response_nuisance <- function(
     outer_folds,
     inner_folds,
     outcome_type,
-    estimate_conditional_variance = FALSE
+    estimate_conditional_variance = FALSE,
+    epsilon = 1e-5
 ) {
   n <- nrow(data)
   As <- sort(unique(data[[A]]))
@@ -17,6 +18,7 @@ estimate_categorical_dose_response_nuisance <- function(
   pi_hat <- mu_hat <- condvar_hat <- numeric(n)
 
   cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
+  if(outer_folds == 1) cv[[1]]$training_set <- cv[[1]]$validation_set
   cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
   outcome_family <- stats::gaussian()
   if(outcome_type == "binomial") outcome_family <- stats::binomial()
@@ -67,7 +69,7 @@ estimate_categorical_dose_response_nuisance <- function(
       )
 
       condvar_hat[validation] <- SuperLearner::predict.SuperLearner(yvar_model, newdata = data[validation, c(X, A)], onlySL = TRUE)$pred
-      condvar_hat[validation] <- ifelse(condvar_hat[validation] < 0, 0, condvar_hat[validation])
+      condvar_hat[validation] <- ifelse(condvar_hat[validation] < epsilon, epsilon, condvar_hat[validation])
     }
   }
 
@@ -103,12 +105,16 @@ categorical_dose_response <- function(
     tmle_maxiter = 25,
     outcome_type = "binomial",
     bayes = FALSE,
-    mcmc_draws = 1e3,
-    prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
+    bayes_draws = 1e3,
+    bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
+    epsilon = 1e-5,
+    nuisance = NULL
 ) {
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
-  nuisance <- estimate_categorical_dose_response_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes)
+  if(is.null(nuisance)) {
+    nuisance <- estimate_categorical_dose_response_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes, epsilon = epsilon)
+  }
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
   Yt <- torch::torch_tensor(data[[Y]])
@@ -163,12 +169,13 @@ categorical_dose_response <- function(
     combined_loss, psi, beta, design_matrix, Q, Delta(H, Yt, torch::torch_tensor(nuisance$mu))
   )
 
+
   draws <- 1e3
   onestep_model <- matrix(nrow = draws, ncol = K)
   params <- mvtnorm::rmvnorm(draws, mean = as.numeric(onestep_est$est), sigma = var(as.matrix(onestep_est$eif)))
   for(index in 1:draws) {
     for(k in 1:K) {
-      onestep_model[index, k] <- as.numeric(working_model(params[index, ], design_matrix[k, 1, ]))
+      onestep_model[index, k] <- as.numeric(working_model(torch::torch_tensor(params[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
     }
   }
 
@@ -217,43 +224,43 @@ categorical_dose_response <- function(
 
     Q_fluctuation <- \(epsilon, K, Q) {
       Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      Q  <- exp(K$matmul(epsilon) * Q) / Qn
-      Q
+      exp(K$matmul(epsilon) * Q) / Qn
     }
 
     # TMLE fluctuation model
-    mse_loss <- nn_mse_loss(reduction = "sum")
+    tmle_linear <- TRUE
+    if(tmle_linear == TRUE) {
+      tmle_loss <- nn_mse_loss(reduction = "sum")
+    }
+    else {
+      tmle_loss <- nn_bce_with_logits_loss(reduction = "sum")
+    }
+
     tmle_fluctuation_model <- \(epsilon, mu, mu_a, clever, clever_K, Q, Y, design_matrix, condvar = NULL, bayes = FALSE) {
       mu  <- mu + clever$clever$matmul(epsilon)
-      Qn <- exp(clever_K$matmul(epsilon) * Q)$sum()
-      Q  <- Q_fluctuation(epsilon, clever_K, Q)
+      Q <- Q_fluctuation(epsilon, clever_K, Q)
 
       if(bayes == FALSE) {
-        target <- mse_loss(mu, Y)
-        target <- target + log(Q)$sum()
+        target <- tmle_loss(mu, Y)
+        target <- target - log(Q)$sum()
         target
       }
       else {
-        #for(k in 1:K) {
-          #mu_a[, k] <- mu_a[, k] + clever$cleverA[k, , ]$matmul(epsilon_star)
-        #}
         mu_a <- mu_a + clever$cleverA$matmul(epsilon)$transpose(1, 2)
 
         beta <- B(combined_loss, mu_a, design_matrix, Q)
 
-        target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum())
+        target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(log(Q)$sum())
 
         # Prior
-        target <- target + prior(as.numeric(beta))
-        jacobian <- torch::torch_zeros(c(p, p))
-        J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
-        for(k in 1:K) {
-          jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul(clever$cleverA[k,])
-        }
-        jacobian <- jacobian + torch::torch_transpose(dB_dQ(combined_loss, psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
-        target <- target + log(abs(jacobian$det()))
-
-        target <- target + as.numeric(log(Q)$sum())
+        #target <- target + bayes_prior(as.numeric(beta))
+        #jacobian <- torch::torch_zeros(c(p, p))
+        #J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
+        #for(k in 1:K) {
+        #  jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul(clever$cleverA[k,])
+        #}
+        #jacobian <- jacobian + torch::torch_transpose(dB_dQ(combined_loss, psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
+        #target <- target + log(abs(jacobian$det()))
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
 
@@ -284,19 +291,21 @@ categorical_dose_response <- function(
         mu_a_star[, k] <- mu_a_star[, k] + clever$cleverA[k, ,]$matmul(epsilon_star)
       }
 
-      Qn <- exp(clever_K$matmul(epsilon_star) * Q_star)$sum()
-      Q_star <- exp(clever_K$matmul(epsilon_star) * Q_star) / Qn
+      Q_star <- Q_fluctuation(epsilon_star, clever_K, Q_star)
 
-      beta_star <- B(combined_loss, mu_a_star, design_matrix, Q_star)$detach()$clone()
+      beta_star <- B(combined_loss, mu_a_star$detach(), design_matrix, Q_star$detach())$detach()$clone()
       beta_star$requires_grad_(TRUE)
 
-      if(abs(m) < 1e-3) {
+      if(abs(m) < 1e-2) {
         break
       }
     }
 
-    tmle_est   <- B(combined_loss, mu_a_star, design_matrix, Q_star)
-    tmle_eif   <- eif(combined_loss, mu_a_star, tmle_est, design_matrix, Q_star, Delta(H, Yt, mu_star))
+    mu_a_star <- mu_a_star$detach()$clone()
+    mu_a_star$requires_grad_(TRUE)
+
+    tmle_est   <- B(combined_loss, mu_a_star$detach(), design_matrix, Q_star$detach())
+    tmle_eif   <- eif(combined_loss, mu_a_star, tmle_est, design_matrix, Q_star$detach(), Delta(H, Yt, mu_star$detach()))
     tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
     tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
     tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
@@ -305,20 +314,35 @@ categorical_dose_response <- function(
     tmle_acc_rate <- NULL
 
     if(bayes == TRUE) {
-      mcmc <- adaptMCMC::MCMC(\(epsilon) tmle_fluctuation_model(
-        torch::torch_tensor(epsilon),
-        mu_star,
-        mu_a_star,
-        clever,
-        clever_K,
-        Q_star,
-        Yt,
-        design_matrix,
-        condvar = torch::torch_tensor(nuisance$condvar),
-        bayes = TRUE
-      ), n = mcmc_draws, init = as.numeric(epsilon_star), adapt = TRUE, acc.rate = 0.234, scale = rep(1e-4, p))
-      tmle_beta_samples <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = mcmc_draws, byrow = TRUE)
-      tmle_acc_rate <- mcmc$acceptance.rate
+      tmle_beta_samples <- array(dim = c(4, bayes_draws, p))
+      tmle_acc_rate <- 0
+
+      for(chain in 1:4) {
+        log_dens <- \(epsilon) tmle_fluctuation_model(
+          torch::torch_tensor(epsilon),
+          mu_star,
+          mu_a_star,
+          clever,
+          clever_K,
+          Q_star,
+          Yt,
+          design_matrix,
+          condvar = torch::torch_tensor(nuisance$condvar),
+          bayes = TRUE
+        )
+
+        mcmc <- adaptMCMC::MCMC(
+          log_dens,
+          n = bayes_draws,
+          init = as.numeric(epsilon_star),
+          adapt = TRUE,
+          acc.rate = 0.3,
+          scale = rep(1e-3, p)
+        )
+
+        tmle_beta_samples[chain, ,] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
+        tmle_acc_rate <- tmle_acc_rate + 1/4 * mcmc$acceptance.rate
+      }
     }
   }
 

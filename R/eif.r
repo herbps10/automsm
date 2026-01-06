@@ -45,7 +45,7 @@ B <- function(Lm, psi, design_matrix, Q) {
     optimizer$step(\() {
       optimizer$zero_grad()
       value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
-      #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
+      cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
       value$backward(retain_graph = TRUE)
       value
     })

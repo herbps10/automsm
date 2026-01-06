@@ -38,7 +38,6 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
     mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
     mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
 
-
     if(estimate_conditional_variance == TRUE) {
       yhat <- SuperLearner::predict.SuperLearner(mu_model, newdata = data[training, c(X, A)], onlySL = TRUE)$pred
       y2 <- (data[[Y]][training] - yhat)^2
@@ -243,17 +242,17 @@ treatment_effect_modification <- function(
         }
 
         # Prior
-        target <- target + bayes_prior(as.numeric(beta))
-        # Jacobian adjustment
-        jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)
-        if(tmle_linear == TRUE) {
-          jacobian <- jacobian$matmul(clever1 - clever0)
-        }
-        else {
-          jacobian <- jacobian$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
-        }
-        jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
-        target <- target + log(abs(jacobian$det()))
+        #target <- target + bayes_prior(as.numeric(beta))
+        ## Jacobian adjustment
+        #jacobian <- torch::torch_transpose(dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)
+        #if(tmle_linear == TRUE) {
+        #  jacobian <- jacobian$matmul(clever1 - clever0)
+        #}
+        #else {
+        #  jacobian <- jacobian$matmul(clever1 * mu1$reshape(c(n, 1)) * (1 - mu1$reshape(c(n, 1))) - clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1))))
+        #}
+        #jacobian <- jacobian + torch::torch_transpose(dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
+        #target <- target + log(abs(jacobian$det()))
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
 
