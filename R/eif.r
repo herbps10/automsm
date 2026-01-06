@@ -16,9 +16,9 @@ dL_dbeta <- function(Lm, t, beta, X, p) {
   torch::torch_cat(r, dim = 2)
 }
 
-ddL <- function(Lm, t, beta, X, p) {
+ddL <- function(Lm, t, beta, X, p, weight = 1) {
   beta$grad <- NULL
-  l <- dL(Lm, t, beta, X)[[1]]
+  l <- dL(Lm, t, beta, X, weight = 1)[[1]]
   r <- map(1:length(l), \(index)
     torch::torch_reshape(torch::autograd_grad(l[index], list(beta), retain_graph = TRUE, create_graph = TRUE)[[1]], shape = c(p, 1))
   )
@@ -64,17 +64,15 @@ dobjective_dpsi <- function(Lm, psi, Q, design_matrix, beta) {
 
   if(length(dim(design_matrix)) == 3) {
     K <- dim(design_matrix)[1]
-    jacob <- torch_zeros(c(K, n, p))
-    for(i in 1:n) {
-      jacob[, i, ] <- (Q[i] * grad_dL(Lm, psi[i, drop = FALSE], beta, design_matrix[, i, drop = FALSE] ))$transpose(1, 2)
-    }
+    obj <- objective(Lm, psi, Q, design_matrix, beta)
+    r <- map(1:p, \(index) autograd_grad(obj[index], psi, retain_graph = TRUE)[[1]]$reshape(c(1, n, K)))
+    return(torch::torch_cat(r)$transpose(1, 3))
   }
   else {
     obj <- objective(Lm, psi, Q, design_matrix, beta)
     r <- map(1:p, \(index) autograd_grad(obj[index], psi, retain_graph = TRUE)[[1]]$reshape(c(n, 1)))
-    jacob <- torch::torch_cat(r, dim = 2)
+    return(torch::torch_cat(r, dim = 2))
   }
-  jacob
 }
 
 dobjective_dQ <- function(Lm, psi, Q, design_matrix, beta) {
@@ -105,14 +103,15 @@ normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q) {
   p <- rev(dim(design_matrix))[1]
   n <- rev(dim(design_matrix))[2]
   M <- matrix(0, p, p)
-  for(i in 1:n) {
-    if(length(dim(design_matrix)) == 3) {
-      M <- M + Q[i] * ddL(Lm, psi[i,, drop = FALSE], beta, design_matrix[, i, , drop=FALSE], p)
-    }
-    else {
-      M <- M + Q[i] * ddL(Lm, psi[i], beta, design_matrix[i, ], p)
-    }
-  }
+  #for(i in 1:n) {
+  #  if(length(dim(design_matrix)) == 3) {
+  #    M <- M + Q[i] * ddL(Lm, psi[i,, drop = FALSE], beta, design_matrix[, i, , drop=FALSE], p)
+  #  }
+  #  else {
+  #    M <- M + Q[i] * ddL(Lm, psi[i], beta, design_matrix[i, ], p)
+  #  }
+  #}
+  M <- ddL(Lm, psi, beta, design_matrix, p, Q) / n
   Minv <- solve(M)
   torch::torch_tensor(Minv)
 }
