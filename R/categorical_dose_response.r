@@ -53,6 +53,7 @@ estimate_categorical_dose_response_nuisance <- function(
       newdata <- data[validation, c(X, A)]
       newdata[[A]] <- As[a_index]
       mu_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(mu_model, newdata = newdata, onlySL = TRUE)$pred
+      if(outcome_type == "binomial") mu_a_hat[validation, a_index] <- bound(mu_a_hat[validation, a_index], 0, 1, epsilon)
     }
 
     if(estimate_conditional_variance == TRUE) {
@@ -103,6 +104,7 @@ categorical_dose_response <- function(
     inner_folds = 5,
     tmle = TRUE,
     tmle_maxiter = 25,
+    tmle_linear = TRUE,
     outcome_type = "binomial",
     bayes = FALSE,
     bayes_draws = 1e3,
@@ -172,11 +174,15 @@ categorical_dose_response <- function(
 
   draws <- 1e3
   onestep_model <- matrix(nrow = draws, ncol = K)
-  params <- mvtnorm::rmvnorm(draws, mean = as.numeric(onestep_est$est), sigma = var(as.matrix(onestep_est$eif)))
+  onestep_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(onestep_est$est), sigma = var(as.matrix(onestep_est$eif)) / n)
   for(index in 1:draws) {
     for(k in 1:K) {
-      onestep_model[index, k] <- as.numeric(working_model(torch::torch_tensor(params[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
+      onestep_model[index, k] <- as.numeric(working_model(torch::torch_tensor(onestep_joint[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
     }
+  }
+  onestep_model_est <- numeric(K)
+  for(k in 1:K) {
+    onestep_model_est[k] <- as.numeric(working_model(onestep_est$est, design_matrix[k, 1, ]$reshape(c(1, p))))
   }
 
   ##### TMLE
@@ -228,7 +234,6 @@ categorical_dose_response <- function(
     }
 
     # TMLE fluctuation model
-    tmle_linear <- TRUE
     if(tmle_linear == TRUE) {
       tmle_loss <- nn_mse_loss(reduction = "sum")
     }
@@ -237,7 +242,13 @@ categorical_dose_response <- function(
     }
 
     tmle_fluctuation_model <- \(epsilon, mu, mu_a, clever, clever_K, Q, Y, design_matrix, condvar = NULL, bayes = FALSE) {
-      mu  <- mu + clever$clever$matmul(epsilon)
+      if(tmle_linear == TRUE) {
+        mu  <- mu + clever$clever$matmul(epsilon)
+      }
+      else {
+        mu <- mu$logit() + clever$clever$matmul(epsilon)
+      }
+
       Q <- Q_fluctuation(epsilon, clever_K, Q)
 
       if(bayes == FALSE) {
@@ -246,21 +257,36 @@ categorical_dose_response <- function(
         target
       }
       else {
-        mu_a <- mu_a + clever$cleverA$matmul(epsilon)$transpose(1, 2)
+        if(tmle_linear == TRUE) {
+          mu_a <- mu_a + clever$cleverA$matmul(epsilon)$transpose(1, 2)
+        }
+        else {
+          mu_a <- torch::torch_sigmoid(mu_a$logit() + clever$cleverA$matmul(epsilon)$transpose(1, 2))
+        }
 
         beta <- B(combined_loss, mu_a, design_matrix, Q)
 
-        target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(log(Q)$sum())
+        if(tmle_linear == TRUE) {
+          target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(log(Q)$sum())
+        }
+        else {
+          target <- -target
+        }
 
         # Prior
-        #target <- target + bayes_prior(as.numeric(beta))
-        #jacobian <- torch::torch_zeros(c(p, p))
-        #J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
-        #for(k in 1:K) {
-        #  jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul(clever$cleverA[k,])
-        #}
-        #jacobian <- jacobian + torch::torch_transpose(dB_dQ(combined_loss, psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
-        #target <- target + log(abs(jacobian$det()))
+        target <- target + bayes_prior(as.numeric(beta))
+        jacobian <- torch::torch_zeros(c(p, p))
+        J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
+        for(k in 1:K) {
+          if(tmle_linear == TRUE) {
+            jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul(clever$cleverA[k,])
+          }
+          else {
+            jacobian <- jacobian + J[k, ,]$transpose(1, 2)$matmul((clever$cleverA[k,] * mu_a[, k]) * (1 - mu_a[, k]))
+          }
+        }
+        jacobian <- jacobian + torch::torch_transpose(dB_dQ(combined_loss, psi, Q, design_matrix, beta), 1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
+        target <- target + log(abs(jacobian$det()))
 
         ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
 
@@ -278,17 +304,28 @@ categorical_dose_response <- function(
       mu_a_star <- mu_a_star$detach()$clone()
       mu_a_star$requires_grad_(TRUE)
 
-      clever_K <- calculate_K(combined_loss, mu_a_star, Q_star, beta_star, design_matrix)
-      clever <- calculate_clever(combined_loss, H, HA, mu_a_star, Q_star, beta_star, design_matrix)
+      clever_K     <- calculate_K(combined_loss, mu_a_star, Q_star, beta_star, design_matrix)
+      clever       <- calculate_clever(combined_loss, H, HA, mu_a_star, Q_star, beta_star, design_matrix)
       epsilon_star <- tmle_mle(p, tmle_fluctuation_model, mu_star, mu_a_star, clever, clever_K, Q_star, Yt)
 
       m <- max(as.numeric(epsilon_star))
       cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
-      mu_star <- mu_star + clever$clever$matmul(epsilon_star)
+      if(tmle_linear == TRUE) {
+        mu_star <- mu_star + clever$clever$matmul(epsilon_star)
+      }
+      else {
+        mu_star <- torch::torch_sigmoid(mu_star$logit() + clever$clever$matmul(epsilon_star))
+      }
+
       mu_a_star <- mu_a_star$detach()$clone()
       for(k in 1:K) {
-        mu_a_star[, k] <- mu_a_star[, k] + clever$cleverA[k, ,]$matmul(epsilon_star)
+        if(tmle_linear == TRUE) {
+          mu_a_star[, k] <- mu_a_star[, k] + clever$cleverA[k, ,]$matmul(epsilon_star)
+        }
+        else {
+          mu_a_star[, k] <- torch::torch_sigmoid(mu_a_star[, k]$logit() + clever$cleverA[k, ,]$matmul(epsilon_star))
+        }
       }
 
       Q_star <- Q_fluctuation(epsilon_star, clever_K, Q_star)
@@ -309,6 +346,18 @@ categorical_dose_response <- function(
     tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
     tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
     tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
+
+    tmle_model <- matrix(nrow = draws, ncol = K)
+    tmle_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(tmle_est), sigma = var(as.matrix(tmle_eif)) / n)
+    for(index in 1:draws) {
+      for(k in 1:K) {
+        tmle_model[index, k] <- as.numeric(working_model(torch::torch_tensor(tmle_joint[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
+      }
+    }
+    tmle_model_est <- numeric(K)
+    for(k in 1:K) {
+      tmle_model_est[k] <- as.numeric(working_model(tmle_est, design_matrix[k, 1, ]$reshape(c(1, p))))
+    }
 
     tmle_beta_samples <- NULL
     tmle_acc_rate <- NULL
@@ -363,7 +412,9 @@ categorical_dose_response <- function(
       upper = as.numeric(onestep_est$upper),
       eif   = onestep_est$eif,
       psi   = as.numeric(psi),
-      model = onestep_model
+      model_est = onestep_model_est,
+      model = onestep_model,
+      joint_draws = onestep_joint
     )
   )
 
@@ -375,7 +426,10 @@ categorical_dose_response <- function(
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       samples = tmle_beta_samples,
-      acc_rate = tmle_acc_rate
+      acc_rate = tmle_acc_rate,
+      model_est = tmle_model_est,
+      model = tmle_model,
+      joint_draws = tmle_joint
     )
   }
 
