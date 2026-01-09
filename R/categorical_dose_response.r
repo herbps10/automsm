@@ -172,19 +172,6 @@ categorical_dose_response <- function(
   )
 
 
-  draws <- 1e3
-  onestep_model <- matrix(nrow = draws, ncol = K)
-  onestep_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(onestep_est$est), sigma = var(as.matrix(onestep_est$eif)) / n)
-  for(index in 1:draws) {
-    for(k in 1:K) {
-      onestep_model[index, k] <- as.numeric(working_model(torch::torch_tensor(onestep_joint[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
-    }
-  }
-  onestep_model_est <- numeric(K)
-  for(k in 1:K) {
-    onestep_model_est[k] <- as.numeric(working_model(onestep_est$est, design_matrix[k, 1, ]$reshape(c(1, p))))
-  }
-
   ##### TMLE
   if(tmle == TRUE) {
     # Calculate clever covariates for fluctuation model
@@ -347,18 +334,6 @@ categorical_dose_response <- function(
     tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
     tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
 
-    tmle_model <- matrix(nrow = draws, ncol = K)
-    tmle_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(tmle_est), sigma = var(as.matrix(tmle_eif)) / n)
-    for(index in 1:draws) {
-      for(k in 1:K) {
-        tmle_model[index, k] <- as.numeric(working_model(torch::torch_tensor(tmle_joint[index, ]), design_matrix[k, 1, ]$reshape(c(1, p))))
-      }
-    }
-    tmle_model_est <- numeric(K)
-    for(k in 1:K) {
-      tmle_model_est[k] <- as.numeric(working_model(tmle_est, design_matrix[k, 1, ]$reshape(c(1, p))))
-    }
-
     tmle_beta_samples <- NULL
     tmle_acc_rate <- NULL
 
@@ -398,6 +373,7 @@ categorical_dose_response <- function(
   res <- list(
     estimand = "categorical_dose_response",
     p = p,
+    n = n,
     terms = terms,
     learners_trt = learners_trt,
     learners_outcome = learners_outcome,
@@ -411,10 +387,7 @@ categorical_dose_response <- function(
       lower = as.numeric(onestep_est$lower),
       upper = as.numeric(onestep_est$upper),
       eif   = onestep_est$eif,
-      psi   = as.numeric(psi),
-      model_est = onestep_model_est,
-      model = onestep_model,
-      joint_draws = onestep_joint
+      psi   = as.numeric(psi)
     )
   )
 
@@ -426,10 +399,7 @@ categorical_dose_response <- function(
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       samples = tmle_beta_samples,
-      acc_rate = tmle_acc_rate,
-      model_est = tmle_model_est,
-      model = tmle_model,
-      joint_draws = tmle_joint
+      acc_rate = tmle_acc_rate
     )
   }
 

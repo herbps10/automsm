@@ -11,7 +11,7 @@ treatment_effect_modification(
   Y,
   formula,
   loss = loss_squared_error,
-  working_model = working_model_tmle_linear,
+  working_model = working_model_linear,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -22,7 +22,9 @@ treatment_effect_modification(
   tmle_linear = TRUE,
   bayes = FALSE,
   bayes_draws = 1000,
-  bayes_prior = function(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE))
+  bayes_prior = function(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
+  epsilon = 1e-05,
+  nuisance = NULL
 )
 }
 \arguments{

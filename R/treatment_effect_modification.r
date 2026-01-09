@@ -122,7 +122,7 @@ treatment_effect_modification <- function(
   n <- nrow(data)
   #data <- data[, c(X, A, Y)]
   if(is.null(nuisance)) {
-    nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes, epsilon = epsilon)
+    nuisance <- estimate_treatment_effect_modification_nuisance(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = bayes && tmle_linear == TRUE, epsilon = epsilon)
   }
 
   Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
@@ -149,6 +149,9 @@ treatment_effect_modification <- function(
   onestep_est <- onestep(
     Lm(loss, working_model), psi, beta, design_matrix, Q, Delta(H, Yt, torch::torch_tensor(nuisance$mu))
   )
+
+  draws <- 1e3
+  onestep_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(onestep_est$est), sigma = var(as.matrix(onestep_est$eif)) / n)
 
   ##### TMLE
   if(tmle == TRUE) {
@@ -232,7 +235,7 @@ treatment_effect_modification <- function(
       }
       else {
         psi <- mu1 - mu0
-        beta <- B(Lm(loss, working_model), psi, design_matrix, Q)
+        beta <- B(Lm(loss, working_model), psi$detach()$clone(), design_matrix, Q$detach()$clone())
 
         if(tmle_linear == TRUE) {
           target <- as.numeric(-((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(log(Q)$sum())
@@ -315,6 +318,7 @@ treatment_effect_modification <- function(
       tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
       tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
       tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
+      tmle_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(as.matrix(tmle_est)), sigma = var(as.matrix(tmle_eif)) / n)
     }
 
     tmle_beta_samples <- NULL
@@ -362,6 +366,7 @@ treatment_effect_modification <- function(
   res <- list(
     estimand = "treatment_effect_modification",
     p = p,
+    f = f,
     terms = terms,
     learners_trt = learners_trt,
     learners_outcome = learners_outcome,
@@ -376,7 +381,7 @@ treatment_effect_modification <- function(
       upper = as.numeric(onestep_est$upper),
       eif   = onestep_est$eif,
       psi   = as.numeric(psi),
-      model = as.numeric(working_model(onestep_est$est, design_matrix))
+      joint_draws = onestep_joint
     )
   )
 
@@ -388,6 +393,7 @@ treatment_effect_modification <- function(
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       psi   = as.numeric(psi_star),
+      joint_draws = tmle_joint,
       samples = tmle_beta_samples,
       acc_rate = tmle_acc_rate
     )
