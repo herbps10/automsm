@@ -366,7 +366,8 @@ treatment_effect_modification <- function(
   res <- list(
     estimand = "treatment_effect_modification",
     p = p,
-    f = f,
+    n = n,
+    formula = formula,
     terms = terms,
     learners_trt = learners_trt,
     learners_outcome = learners_outcome,

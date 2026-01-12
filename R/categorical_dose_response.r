@@ -38,6 +38,7 @@ estimate_categorical_dose_response_nuisance <- function(
       )
 
       pi_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
+      pi_a_hat[validation, a_index] <- bound(pi_a_hat[validation, a_index], 0, 1, epsilon)
     }
 
     mu_model <- SuperLearner::SuperLearner(
@@ -374,6 +375,7 @@ categorical_dose_response <- function(
     estimand = "categorical_dose_response",
     p = p,
     n = n,
+    formula = formula,
     terms = terms,
     learners_trt = learners_trt,
     learners_outcome = learners_outcome,

@@ -6,7 +6,7 @@ predict.targeted_msm <- function(object, ...) {
 }
 
 predict_treatment_effect_modification <- function(fit, newdata, estimator = "tmle", type = "point") {
-  design_matrix <- model.matrix(fit$f, newdata)
+  design_matrix <- model.matrix(fit$formula, newdata)
 
   n <- fit$n
 
