@@ -66,7 +66,7 @@ ggplot(pred, aes(A, point)) +
   geom_line() +
   geom_line(aes(y = lower), lty = 2) +
   geom_line(aes(y = upper), lty = 2) +
-  labs(x = "A", y = "Counterfactual mean", main = "Estimated dose-response curve")
+  labs(x = "A", y = "Counterfactual mean", title = "Estimated dose-response curve")
 ```
 
 Estimating a linear working model with squared error loss function for summarizing Conditional Average Treatment Effects:

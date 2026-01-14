@@ -76,9 +76,7 @@ ggplot(pred, aes(A, point)) +
   geom_line() +
   geom_line(aes(y = lower), lty = 2) +
   geom_line(aes(y = upper), lty = 2) +
-  labs(x = "A", y = "Counterfactual mean", main = "Estimated dose-response curve")
-#> Ignoring unknown labels:
-#> • main : "Estimated dose-response curve"
+  labs(x = "A", y = "Counterfactual mean", title = "Estimated dose-response curve")
 ```
 
 <img src="man/figures/README-plot-1.png" alt="" width="75%" />
