@@ -1,6 +1,6 @@
-
-
-tmle_mle <- \(p, fluctuation_model, ...) {
+#' @importFrom torch torch_tensor optim_lbfgs
+#' @noRd
+tmle_mle <- function(p, fluctuation_model, ...) {
   epsilon <- torch::torch_tensor(rep(0, p), requires_grad = TRUE)
   optimizer <- torch::optim_lbfgs(epsilon)
   for(iter in 1:2) {

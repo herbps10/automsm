@@ -1,4 +1,9 @@
+#' Tidy method for objects of class "targeted_msm"
+#' @param x object of class "targeted_msm"
+#' @param ... additional arguments (not currently used)
 #' @importFrom generics tidy
+#' @importFrom stats median quantile sd
+#' @importFrom tibble tibble
 #' @export
 tidy.targeted_msm <- function(x, ...) {
   results <- tibble::tibble(
@@ -24,10 +29,10 @@ tidy.targeted_msm <- function(x, ...) {
       results <- rbind(results, tibble::tibble(
         estimator = "bayestmle",
         term      = x$terms,
-        estimate  = as.numeric(apply(x$tmle$samples, 3, median)),
-        conf.low  = as.numeric(apply(x$tmle$samples, 3, quantile, 0.025)),
-        conf.high = as.numeric(apply(x$tmle$samples, 3, quantile, 0.975)),
-        std.error = as.numeric(apply(x$tmle$samples, 3, sd))
+        estimate  = as.numeric(apply(x$tmle$samples, 3, stats::median)),
+        conf.low  = as.numeric(apply(x$tmle$samples, 3, stats::quantile, 0.025)),
+        conf.high = as.numeric(apply(x$tmle$samples, 3, stats::quantile, 0.975)),
+        std.error = as.numeric(apply(x$tmle$samples, 3, stats::sd))
       ))
     }
   }

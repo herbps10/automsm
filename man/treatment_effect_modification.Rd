@@ -10,19 +10,21 @@ treatment_effect_modification(
   A,
   Y,
   formula,
+  outcome_type = "binomial",
   loss = loss_squared_error,
   working_model = working_model_linear,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
   inner_folds = 5,
-  outcome_type = "binomial",
   tmle = TRUE,
   tmle_maxiter = 25,
   tmle_linear = TRUE,
   bayes = FALSE,
   bayes_draws = 1000,
-  bayes_prior = function(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
+  bayes_chains = 4,
+  bayes_prior = function(beta) sum(stats::dnorm(as.numeric(beta), mean = 0, sd = 1, log =
+    TRUE)),
   epsilon = 1e-05,
   nuisance = NULL
 )
@@ -38,7 +40,11 @@ treatment_effect_modification(
 
 \item{formula}{marginal structural model design matrix formula}
 
+\item{outcome_type}{outcome type ("continuous" or "binomial")}
+
 \item{loss}{marginal structural model loss function}
+
+\item{working_model}{model marginal structural model working model}
 
 \item{learners_trt}{SuperLearner libraries for estimating propensity score}
 
@@ -47,8 +53,6 @@ treatment_effect_modification(
 \item{outer_folds}{number of folds in outer cross-fitting loop}
 
 \item{inner_folds}{number of folds for inner SuperLearner cross-validation within each outer cross-fitting loop}
-
-\item{outcome_type}{outcome type ("continuous" or "binomial")}
 
 \item{tmle}{whether to run TMLE estimator (TRUE/FALSE)}
 
@@ -60,9 +64,13 @@ treatment_effect_modification(
 
 \item{bayes_draws}{number of MCMC samples}
 
+\item{bayes_chains}{number of independent MCMC chains}
+
 \item{bayes_prior}{prior to apply to marginal structural model parameters}
 
-\item{working}{model marginal structural model working model}
+\item{epsilon}{adjustment for estimated values close to zero or one}
+
+\item{nuisance}{list of nuisance parameters}
 }
 \description{
 Estimate Marginal Structural Model for Treatment Effect Modifiers

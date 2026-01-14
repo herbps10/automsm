@@ -1,3 +1,6 @@
+#' Print method for objects of class "targeted_msm"
+#' @param x object of class "targeted_msm"
+#' @param ... additional arguments (not currently used)
 #' @export
 print.targeted_msm <- function(x, ...) {
   cat("MSM for ")

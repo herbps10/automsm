@@ -1,3 +1,7 @@
+#' @importFrom  origami  make_folds
+#' @importFrom  SuperLearner SuperLearner.CV.control predict.SuperLearner SuperLearner
+#' @importFrom stats gaussian binomial
+#' @noRd
 estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learners_trt, learners_outcome, outer_folds, inner_folds, outcome_type, estimate_conditional_variance = FALSE, epsilon = 1e-5) {
   n <- nrow(data)
   data0 <- data1 <- data
@@ -35,6 +39,7 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
     )
 
     pi_hat[validation]  <- SuperLearner::predict.SuperLearner(pi_model, newdata = data[validation, c(X), drop = FALSE], onlySL = TRUE)$pred
+    pi_hat[validation] <- bound(pi_hat[validation], 0, 1, epsilon)
     mu0_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data0[validation, c(X, A)], onlySL = TRUE)$pred
     mu1_hat[validation] <- SuperLearner::predict.SuperLearner(mu_model, newdata = data1[validation, c(X, A)], onlySL = TRUE)$pred
 
@@ -82,19 +87,26 @@ estimate_treatment_effect_modification_nuisance <- function(data, X, A, Y, learn
 #' @param A treatment column
 #' @param Y outcome column
 #' @param formula marginal structural model design matrix formula
+#' @param outcome_type outcome type ("continuous" or "binomial")
 #' @param loss marginal structural model loss function
-#' @param working model marginal structural model working model
+#' @param working_model model marginal structural model working model
 #' @param learners_trt SuperLearner libraries for estimating propensity score
 #' @param learners_outcome SuperLearner libraries for estimating outcome regression
 #' @param outer_folds number of folds in outer cross-fitting loop
 #' @param inner_folds number of folds for inner SuperLearner cross-validation within each outer cross-fitting loop
-#' @param outcome_type outcome type ("continuous" or "binomial")
 #' @param tmle whether to run TMLE estimator (TRUE/FALSE)
 #' @param tmle_maxiter maximum number of TMLE iterations
 #' @param tmle_linear whether to use linear TMLE fluctuation model (TRUE) or logistic fluctuation model (FALSE)
 #' @param bayes whether to run Bayesian TMLE estimator
 #' @param bayes_draws number of MCMC samples
+#' @param bayes_chains number of independent MCMC chains
 #' @param bayes_prior prior to apply to marginal structural model parameters
+#' @param epsilon adjustment for estimated values close to zero or one
+#' @param nuisance list of nuisance parameters
+#'
+#' @importFrom torch torch_tensor torch_zeros torch_reshape nn_bce_with_logits_loss nn_mse_loss
+#' @importFrom stats dnorm qnorm
+#' @importFrom adaptMCMC MCMC
 #'
 #' @export
 treatment_effect_modification <- function(
@@ -103,19 +115,20 @@ treatment_effect_modification <- function(
     A,
     Y,
     formula,
+    outcome_type = "binomial",
     loss = loss_squared_error,
     working_model = working_model_linear,
     learners_trt = "SL.glm",
     learners_outcome = "SL.glm",
     outer_folds = 5,
     inner_folds = 5,
-    outcome_type = "binomial",
     tmle = TRUE,
     tmle_maxiter = 25,
     tmle_linear = TRUE,
     bayes = FALSE,
     bayes_draws = 1e3,
-    bayes_prior = \(beta) sum(dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
+    bayes_chains = 4,
+    bayes_prior = function(beta) sum(stats::dnorm(as.numeric(beta), mean = 0, sd = 1, log = TRUE)),
     epsilon = 1e-5,
     nuisance = NULL
 ) {
@@ -133,7 +146,7 @@ treatment_effect_modification <- function(
   design_matrix <- torch::torch_tensor(mat)$reshape(c(n, ncol(mat)))
   p <- ncol(design_matrix)
 
-  Delta <- \(H, Y, mu) H * (Y - mu)
+  Delta <- function(H, Y, mu) H * (Y - mu)
 
   ##### Plugin estimator
   Q <- torch::torch_tensor(rep(1 / n, n))
@@ -156,11 +169,11 @@ treatment_effect_modification <- function(
   ##### TMLE
   if(tmle == TRUE) {
     # Calculate clever covariates for fluctuation model
-    calculate_clever <- \(Lm, H, H0, H1, psi, Q, beta, design_matrix) {
+    calculate_clever <- function(Lm, H, H0, H1, psi, Q, beta, design_matrix) {
       p <- ncol(design_matrix)
       n <- nrow(design_matrix)
 
-      clever <- torch::torch_tensor(matrix(0, n, p))
+      clever  <- torch::torch_tensor(matrix(0, n, p))
       clever0 <- torch::torch_tensor(matrix(0, n, p))
       clever1 <- torch::torch_tensor(matrix(0, n, p))
       Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
@@ -171,14 +184,14 @@ treatment_effect_modification <- function(
         clever1[i, ] <- torch::torch_reshape(H1[i] * d, p)
       }
       list(
-        clever = clever,
+        clever  = clever,
         clever0 = clever0,
         clever1 = clever1
       )
     }
 
     # Clever covariate for marginal distribution of covariates
-    calculate_K <- \(Lm, psi, Q, beta, design_matrix) {
+    calculate_K <- function(Lm, psi, Q, beta, design_matrix) {
       p <- rev(dim(design_matrix))[1]
       n <- rev(dim(design_matrix))[2]
 
@@ -190,12 +203,12 @@ treatment_effect_modification <- function(
       K
     }
 
-    dQ_fluctuation_depsilon <- \(epsilon, K, Q) {
+    dQ_fluctuation_depsilon <- function(epsilon, K, Q) {
       Qn <- exp(K$matmul(epsilon) * Q)$sum()
       Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn)
     }
 
-    Q_fluctuation <- \(epsilon, K, Q) {
+    Q_fluctuation <- function(epsilon, K, Q) {
       Qn <- exp(K$matmul(epsilon) * Q)$sum()
       Q  <- exp(K$matmul(epsilon) * Q) / Qn
       Q
@@ -203,13 +216,13 @@ treatment_effect_modification <- function(
 
     # TMLE fluctuation model
     if(tmle_linear == TRUE) {
-      tmle_loss <- nn_mse_loss(reduction = "sum")
+      tmle_loss <- torch::nn_mse_loss(reduction = "sum")
     }
     else {
-      tmle_loss <- nn_bce_with_logits_loss(reduction = "sum")
+      tmle_loss <- torch::nn_bce_with_logits_loss(reduction = "sum")
     }
 
-    tmle_fluctuation_model <- \(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
+    tmle_fluctuation_model <- function(epsilon, mu, mu0, mu1, clever, clever0, clever1, K, Q, Y, design_matrix, Lm = NULL, condvar = NA, bayes = FALSE) {
       # Fluctuate covariate distribution
       Q <- Q_fluctuation(epsilon, K, Q)
 
@@ -287,7 +300,7 @@ treatment_effect_modification <- function(
       }
 
       m <- max(as.numeric(epsilon_star))
-      cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
+      #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
       if(tmle_linear == TRUE) {
         mu_star  <- mu_star  + clever$clever$matmul(epsilon_star)
@@ -316,22 +329,21 @@ treatment_effect_modification <- function(
       tmle_est   <- B(Lm(loss, working_model), psi_star, design_matrix, Q_star)
       tmle_eif   <- eif(Lm(loss, working_model), psi_star, tmle_est, design_matrix, Q_star, Delta(H, Yt, mu_star))
       tmle_se    <- apply(tmle_eif, 2, sd) / sqrt(n)
-      tmle_lower <- tmle_est + qnorm(0.025) * tmle_se
-      tmle_upper <- tmle_est + qnorm(0.975) * tmle_se
-      tmle_joint <- mvtnorm::rmvnorm(draws, mean = as.numeric(as.matrix(tmle_est)), sigma = var(as.matrix(tmle_eif)) / n)
+      tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
+      tmle_upper <- tmle_est + stats::qnorm(0.975) * tmle_se
     }
 
     tmle_beta_samples <- NULL
     tmle_acc_rate <- NULL
 
     if(bayes == TRUE) {
-      tmle_beta_samples <- array(dim = c(4, bayes_draws, p))
+      tmle_beta_samples <- array(dim = c(bayes_chains, bayes_draws, p))
       tmle_acc_rate <- 0
 
-      for(chain in 1:4) {
+      for(chain in 1:bayes_chains) {
         cat("Chain: ", chain, "\n\n")
 
-        log_dens <- \(epsilon) tmle_fluctuation_model(
+        log_dens <- function(epsilon) tmle_fluctuation_model(
           torch::torch_tensor(epsilon),
           mu_star,
           mu0_star,
@@ -357,7 +369,7 @@ treatment_effect_modification <- function(
         )
 
         tmle_beta_samples[chain, ,] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = bayes_draws, byrow = TRUE)
-        tmle_acc_rate <- tmle_acc_rate + 1/4 * mcmc$acceptance.rate
+        tmle_acc_rate <- tmle_acc_rate + 1/bayes_chains * mcmc$acceptance.rate
       }
 
     }
@@ -394,7 +406,6 @@ treatment_effect_modification <- function(
       upper = as.numeric(tmle_upper),
       eif   = tmle_eif,
       psi   = as.numeric(psi_star),
-      joint_draws = tmle_joint,
       samples = tmle_beta_samples,
       acc_rate = tmle_acc_rate
     )

@@ -1,18 +1,23 @@
+#' Summary method for class "targeted_msm"
+#' @param object object of class "targeted_msm"
+#' @param ... additional arguments (not currently used)
 #' @export
-summary.targeted_msm <- function(x, ...) {
+summary.targeted_msm <- function(object, ...) {
   cat("Marginal Structural Model: ")
-  if(x$estimand == "treatment_effect_modification") {
-    summary_treatment_effect_modification(x)
+  if(object$estimand == "treatment_effect_modification") {
+    summary_treatment_effect_modification(object)
   }
-  else if(x$estimand == "categorical_dose_response") {
-    summary_categorical_dose_response(x)
+  else if(object$estimand == "categorical_dose_response") {
+    summary_categorical_dose_response(object)
   }
 }
 
+#' @importFrom stringr str_pad
+#' @noRd
 summary_treatment_effect_modification <- function(x) {
   cat("Treatment Effect Modification\n")
 
-  f <- \(x) stringr::str_pad(round(x, 2), 5, side = "left", pad = " ")
+  f <- function(x) stringr::str_pad(round(x, 2), 5, side = "left", pad = " ")
 
   cat("One-step estimator\n")
   cat("    Est      SE    2.5%   97.5%\n")
@@ -29,10 +34,12 @@ summary_treatment_effect_modification <- function(x) {
   }
 }
 
+#' @importFrom stringr str_pad
+#' @noRd
 summary_categorical_dose_response <- function(x) {
   cat("Categorical Dose-Response Function\n")
 
-  f <- \(x) stringr::str_pad(round(x, 2), 5, side = "left", pad = " ")
+  f <- function(x) stringr::str_pad(round(x, 2), 5, side = "left", pad = " ")
 
   cat("One-step estimator\n")
   cat("    Est      SE    2.5%   97.5%\n")
