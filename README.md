@@ -81,7 +81,7 @@ ggplot(pred, aes(A, point)) +
 #> • main : "Estimated dose-response curve"
 ```
 
-<img src="man/figures/README-plot-1.png" alt="" width="100%" />
+<img src="man/figures/README-plot-1.png" alt="" width="75%" />
 
 Estimating a linear working model with squared error loss function for
 summarizing Conditional Average Treatment Effects:
