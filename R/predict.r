@@ -37,10 +37,10 @@ predict_treatment_effect_modification <- function(fit, newdata, estimator = "tml
     }
 
     if(type == "point") {
-      (design_matrix %*% t(t(est)))[,1]
+      as.numeric(fit$working_model(torch::torch_tensor(est), torch::torch_tensor(design_matrix)))
     }
     else {
-      apply(design_matrix, 1, function(x) (joint_draws %*% t(t(x)))[, 1], simplify = FALSE)
+      asplit(apply(joint_draws, 1, function(x) as.matrix(fit$working_model(torch::torch_tensor(x), torch::torch_tensor(design_matrix))), simplify = TRUE), 1)
     }
   }
   else if(estimator == "bayes") {
@@ -51,6 +51,7 @@ predict_treatment_effect_modification <- function(fit, newdata, estimator = "tml
 
 #' @importFrom stats model.matrix var
 #' @importFrom mvtnorm rmvnorm
+#' @importFrom torch torch_tensor
 #' @noRd
 predict_categorical_dose_response <- function(fit, newdata, estimator = "tmle", type = "point") {
   design_matrix <- stats::model.matrix(fit$formula, newdata)
@@ -69,10 +70,10 @@ predict_categorical_dose_response <- function(fit, newdata, estimator = "tmle", 
     }
 
     if(type == "point") {
-      (design_matrix %*% t(t(est)))[,1]
+      as.numeric(fit$working_model(torch::torch_tensor(est), torch::torch_tensor(design_matrix)))
     }
     else {
-      apply(design_matrix, 1, function(x) (joint_draws %*% t(t(x)))[, 1], simplify = FALSE)
+      asplit(apply(joint_draws, 1, function(x) as.matrix(fit$working_model(torch::torch_tensor(x), torch::torch_tensor(design_matrix))), simplify = TRUE), 1)
     }
   }
   else if(estimator == "bayes") {

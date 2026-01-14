@@ -380,6 +380,8 @@ treatment_effect_modification <- function(
     p = p,
     n = n,
     formula = formula,
+    working_model = working_model,
+    loss = loss,
     terms = terms,
     learners_trt = learners_trt,
     learners_outcome = learners_outcome,

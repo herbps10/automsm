@@ -18,3 +18,22 @@ simulate_treatment_effect_modification <- function(N = 1e3, sigma = 0.1, seed = 
 
   data.frame(X1, X2, A, Y)
 }
+
+#' Simulate example data for the conditional dose-response curve NP-MSM.
+#' @param N sample size
+#' @param treatments number of discrete treatments
+#' @param sigma conditional standard deviation of outcome
+#' @param seed random number seed (optional)
+#' @return data frame of simulated data
+#' @importFrom stats runif rnorm
+#' @export
+simulate_categorical_dose_response <- function(N = 1e3, treatments = 25, sigma = 0.1, seed = NULL) {
+  if(!is.null(seed)) set.seed(seed)
+
+  X1 <- stats::runif(N)
+  X2 <- stats::runif(N)
+  A  <- sample(1:treatments, N, replace = TRUE)
+  Y  <- stats::rnorm(N, 2 / A, sigma)
+
+  data.frame(X1, X2, A, Y)
+}

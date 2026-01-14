@@ -29,11 +29,50 @@ pak::pak("herbps10/TargetedMSM")
 ```
 
 ## Example
-Estimating a linear working model with squared error loss function for summarizing Conditional Average Treatment Effects:
-```{r example}
+Estimate a linear working model with squared error loss function for summarizing a dose-response curve:
+```{r example1}
 library(TargetedMSM)
 
-data <- simulate_treatment_effect_modification(N = 1000, seed = 1)
+set.seed(10016)
+data <- simulate_categorical_dose_response(N = 500)
+
+fit <- categorical_dose_response(
+  data,
+  c("X1", "X2"),
+  "A",
+  "Y",
+  formula = ~1 + A,
+  outcome_type = "continuous",
+  learners_trt = c("SL.glm.interaction"),
+  learners_outcome = c("SL.glm.interaction"),
+  loss = loss_squared_error,
+  working_model = function(beta, X) beta[1]$mul(X[, 2]$pow(beta[2]))
+)
+
+summary(fit)
+```
+
+Predict from the estimated NP-MSM and plot results:
+```{r plot}
+library(purrr)
+library(ggplot2)
+
+pred <- data.frame(A = 1:25)
+pred$point <- predict(fit, pred)
+pred$lower <- map_dbl(predict(fit, pred, type = "joint"), quantile, 0.025)
+pred$upper <- map_dbl(predict(fit, pred, type = "joint"), quantile, 0.975)
+
+ggplot(pred, aes(A, point)) +
+  geom_line() +
+  geom_line(aes(y = lower), lty = 2) +
+  geom_line(aes(y = upper), lty = 2) +
+  labs(x = "A", y = "Counterfactual mean", main = "Estimated dose-response curve")
+```
+
+Estimating a linear working model with squared error loss function for summarizing Conditional Average Treatment Effects:
+```{r example2}
+set.seed(10016)
+data <- simulate_treatment_effect_modification(N = 500)
 
 fit <- treatment_effect_modification(
   data,
@@ -44,12 +83,9 @@ fit <- treatment_effect_modification(
   outcome_type = "continuous",
   learners_trt = c("SL.glm.interaction"),
   learners_outcome = c("SL.glm.interaction"),
-  working_model = working_model_linear,
-  loss = loss_squared_error
+  loss = loss_squared_error,
+  working_model = working_model_linear
 )
-```
 
-Estimated NP-MSM coefficients:
-```{r}
 summary(fit)
 ```
