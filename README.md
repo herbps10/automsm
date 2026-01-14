@@ -45,8 +45,6 @@ fit <- categorical_dose_response(
   working_model = function(beta, X) beta[1]$mul(X[, 2]$pow(beta[2]))
 )
 #> Loading required package: nnls
-#> TMLE iteration: 1, max(epsilon): -0.0119739724323153
-#> TMLE iteration: 2, max(epsilon): 2.02724477276206e-05
 
 summary(fit)
 #> Marginal Structural Model: Categorical Dose-Response Function
@@ -65,7 +63,6 @@ Predict from the estimated NP-MSM and plot results:
 ``` r
 library(purrr)
 library(ggplot2)
-#> Warning: package 'ggplot2' was built under R version 4.5.2
 
 pred <- data.frame(A = 1:25)
 pred$point <- predict(fit, pred)

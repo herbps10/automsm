@@ -332,7 +332,7 @@ categorical_dose_response <- function(
       epsilon_star <- tmle_mle(p, tmle_fluctuation_model, mu_star, mu_a_star, clever, clever_K, Q_star, Yt)
 
       m <- max(as.numeric(epsilon_star))
-      cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
+      #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
       if(tmle_linear == TRUE) {
         mu_star <- mu_star + clever$clever$matmul(epsilon_star)

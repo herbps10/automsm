@@ -53,7 +53,7 @@ summary(fit)
 ```
 
 Predict from the estimated NP-MSM and plot results:
-```{r plot}
+```{r plot, warning=FALSE, message=FALSE}
 library(purrr)
 library(ggplot2)
 
