@@ -3,6 +3,7 @@
 #' @param sigma conditional standard deviation of outcome
 #' @return data frame of simulated data
 #' @importFrom stats runif rbinom rnorm
+#' @export
 simulate_treatment_effect_modification <- function(N = 1e3, sigma = 0.1, seed = NULL) {
   if(!is.null(seed)) set.seed(seed)
 
