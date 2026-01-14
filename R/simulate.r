@@ -9,10 +9,10 @@ simulate_treatment_effect_modification <- function(N = 1e3, sigma = 0.1, seed = 
   X1 <- stats::runif(N)
   X2 <- stats::runif(N)
   A  <- stats::rbinom(N, 1, plogis(X1))
-  mu0 <- X1
-  mu1 <- X1
+  mu0 <- 0.5 * X1
+  mu1 <- 0.5 * X1 + X2
   mu <- ifelse(A == 1, mu1, mu0)
   Y  <- stats::rnorm(N, mu, sigma)
 
-  data.frame(X1, X2, A, Y, mu, mu0, mu1)
+  data.frame(X1, X2, A, Y)
 }

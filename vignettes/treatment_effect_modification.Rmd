@@ -1,0 +1,146 @@
+---
+title: "Treatment Effect Modification"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Treatment Effect Modification}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(TargetedMSM)
+library(ggplot2)
+```
+
+This vignette illustrates how to use the `TargetedMSM` package to estimate a Non-parametric Marginal Structural Model to summarize the relationship between a Conditional Average Treatment Effect (CATE) and a set of treatment effect modifiers.
+
+The package has a built in function to generate simulated data for this setting. To begin, let's generate $500$ observations.
+```{r}
+data <- simulate_treatment_effect_modification(N = 500, seed = 1)
+
+head(data)
+```
+The columns of the simulated dataset are
+- `X1`, `X2`: continuous covariates.
+- `A`: binary treatment variable ($A = 0$ indicates control, and $A = 1$ indicates treatment).
+- `Y`: a continuous outcome variable.
+For convenience, we will write $X = (X_1, X_2)$ to denote the set of both covariates.
+
+```{r}
+ggplot(data, aes(X2, Y, color = factor(A))) +
+  geom_point()
+```
+
+The _Conditional Average Treatment Effect_ (CATE) is defined as $\psi(X) = \mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]$. Under appropriate causal assumptions, the CATE can be interpreted as the average causal effect of treatment versus control for those with covariates values $X$. 
+
+For high-dimensional covariates $X$, the CATE may be difficult to estimate. One popular parameter for summarizing the CATE is to estimate the _Average Treatment Effect_ (ATE), which is the CATE averaged over the population distribution. Formally, the CATE is defined as $\psi^{\mathsf{ATE}} = \mathbb{E}[\mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]]$.
+
+The ATE can be estimated using the `treatment_effect_modification` function.
+First, we need to set the SuperLearner methods that will be used to estimate the required nuisance parameters.
+```{r}
+learners <- "SL.glm.interaction"
+```
+
+Then, we can estimate the ATE:
+```{r}
+fit_ate <- treatment_effect_modification(
+  data,
+  c("X1", "X2"),
+  "A",
+  "Y",
+  formula = ~1,
+  outcome_type = "continuous",
+  learners_trt = learners,
+  learners_outcome = learners
+)
+```
+
+The results can be viewed using the `summary` function:
+```{r}
+summary(fit_ate)
+```
+The TMLE estimate of the ATE is $0.49$ (95\% CI: $0.47$ - $0.51$).
+
+We may also be interested in summarizing how the CATE changes as a function of the covariates. Suppose we are interested in $X_2$ as a _treatment effect modifier_. One way to investigate this is to summarize the relationship between the CATE and $X_2$ in terms of a linear working model that minimizes the squared error between the CATE and the working model predictions:
+```{r}
+fit <- treatment_effect_modification(
+  data,
+  c("X1", "X2"),
+  "A",
+  "Y",
+  formula = ~1 + X2,
+  outcome_type = "continuous",
+  learners_trt = c("SL.glm.interaction"),
+  learners_outcome = c("SL.glm.interaction"),
+  working_model = working_model_linear,
+  loss = loss_squared_error
+)
+```
+We can view the estimated NP-MSM coefficients using `summary`:
+```{r}
+summary(fit)
+```
+
+Next, let's use the estimated NP-MMS to make predictions on the treatment effect for a range of values of $X_2$:
+```{r}
+pred <- data.frame(X2 = seq(0, 1, 0.1))
+pred$point <- predict(fit, newdata)
+
+ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
+  geom_line() +
+  geom_function(fun = function(x) x, aes(color = "True"))
+  ylab("Treatment Effect")
+```
+
+We can also make 95\% confidence intervals:
+```{r}
+pred$ci <- predict(fit, newdata, type = "joint")
+pred$lower <- purrr::map_dbl(pred$ci, quantile, 0.025)
+pred$upper <- purrr::map_dbl(pred$ci, quantile, 0.975)
+
+ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
+  geom_line() +
+  geom_line(aes(y = lower), lty = 2) +
+  geom_line(aes(y = upper), lty = 2) +
+  geom_function(fun = function(x) x, aes(color = "True"))
+  ylab("Treatment Effect")
+```
+
+Suppose that we wish to fit a more flexible NP-MSM. For example, we could use a working model based on B-splines:
+```{r}
+fit_splines <- treatment_effect_modification(
+  data,
+  c("X1", "X2"),
+  "A",
+  "Y",
+  formula = ~1 + splines::bs(X2, Boundary.knots = c(0, 1), knots = seq(0, 0.75, 0.25)),
+  outcome_type = "continuous",
+  learners_trt = c("SL.glm.interaction"),
+  learners_outcome = c("SL.glm.interaction"),
+  working_model = working_model_linear,
+  loss = loss_squared_error
+)
+```
+
+And now plot the resulting predictions:
+```{r}
+pred_splines <- data.frame(X2 = seq(0, 1, 0.1))
+pred_splines$point <- predict(fit_splines, newdata)
+pred_splines$ci <- predict(fit_splines, newdata, type = "joint")
+pred_splines$lower <- purrr::map_dbl(pred_splines$ci, quantile, 0.025)
+pred_splines$upper <- purrr::map_dbl(pred_splines$ci, quantile, 0.975)
+
+ggplot(pred_splines, aes(X2, point, color = "TMLE Estimate")) +
+  geom_line() +
+  geom_line(aes(y = lower), lty = 2) +
+  geom_line(aes(y = upper), lty = 2) +
+  geom_function(fun = function(x) x, aes(color = "True")) +
+  ylab("Treatment Effect")
+```

@@ -10,10 +10,10 @@
 #' @exportS3Method
 predict.targeted_msm <- function(object, newdata, estimator = "tmle", type = "point", ...) {
   if(object$estimand == "treatment_effect_modification") {
-    predict_treatment_effect_modification(object, ...)
+    predict_treatment_effect_modification(object, newdata, estimator, type, ...)
   }
   else if(object$estimand == "categorical_dose_response") {
-    predict_categorical_dose_response(object, ...)
+    predict_categorical_dose_response(object, newdata, estimator, type, ...)
   }
 }
 
