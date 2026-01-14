@@ -1,15 +1,19 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# TargetedMSM
+# TargetedMSM <img src="man/figures/logo.png" align="right" height="140" />
 
 <!-- badges: start -->
 
 [![R-CMD-check](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-Targeted estimation for a general class of Non-parametric Marginal
-Structural Models (NP-MSMs)
+## Overview
+
+The `TargetedMSM` package provides targeted estimation for a general
+class of Non-parametric Marginal Structural Models (NP-MSMs). The
+package relies on automatic differentiation to estimtae NP-MSMs with
+arbitrary user-supplied working models and loss functions.
 
 ## Installation
 
