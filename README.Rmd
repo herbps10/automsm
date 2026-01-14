@@ -1,20 +1,27 @@
+---
+output: github_document
+---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
 # TargetedMSM
-
 <!-- badges: start -->
-
 [![R-CMD-check](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
-
-Targeted estimation for a general class of Non-parametric Marginal
-Structural Models (NP-MSMs)
+  
+Targeted estimation for a general class of Non-parametric Marginal Structural Models (NP-MSMs)
 
 ## Installation
 
-You can install the development version of TargetedMSM from
-[GitHub](https://github.com/) with:
+You can install the development version of TargetedMSM from [GitHub](https://github.com/) with:
 
 ``` r
 # install.packages("pak")
@@ -22,11 +29,8 @@ pak::pak("herbps10/TargetedMSM")
 ```
 
 ## Example
-
-Estimating a linear working model with squared error loss function for
-summarizing Conditional Average Treatment Effects:
-
-``` r
+Estimating a linear working model with squared error loss function for summarizing Conditional Average Treatment Effects:
+```{r example}
 library(TargetedMSM)
 
 data <- simulate_treatment_effect_modification(N = 1000, seed = 1)
@@ -43,20 +47,9 @@ fit <- treatment_effect_modification(
   working_model = working_model_linear,
   loss = loss_squared_error
 )
-#> Loading required package: nnls
 ```
 
 Estimated NP-MSM coefficients:
-
-``` r
+```{r}
 summary(fit)
-#> Marginal Structural Model: Treatment Effect Modification
-#> One-step estimator
-#>     Est      SE    2.5%   97.5%
-#>       0    0.01   -0.03    0.03 
-#>    0.99    0.02    0.94    1.03 
-#> TMLE estimator
-#>     Est      SE    2.5%   97.5%
-#>       0    0.01   -0.03    0.03 
-#>    0.99    0.02    0.94    1.04
 ```
