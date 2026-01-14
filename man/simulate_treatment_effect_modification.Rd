@@ -10,6 +10,8 @@ simulate_treatment_effect_modification(N = 1000, sigma = 0.1, seed = NULL)
 \item{N}{sample size}
 
 \item{sigma}{conditional standard deviation of outcome}
+
+\item{seed}{random number seed (optional)}
 }
 \value{
 data frame of simulated data
