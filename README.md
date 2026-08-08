@@ -42,7 +42,7 @@ of their differences.
 ## Installation
 
 You can install the development version of TargetedMSM from
-[GitHub](https://github.com/) with:
+[GitHub](https://github.com/herbps10/TargetedMSM) with:
 
 ``` r
 # install.packages("pak")
