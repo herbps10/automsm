@@ -7,9 +7,14 @@
 \method{tidy}{targeted_msm}(x, ...)
 }
 \arguments{
-\item{x}{object of class "targeted_msm"}
+\item{x}{An object of class \code{"targeted_msm"}}
 
-\item{...}{additional arguments (not currently used)}
+\item{...}{Additional arguments (not currently used)}
+}
+\value{
+A tibble with one row per (estimator, term) combination and columns
+\code{estimator}, \code{term}, \code{estimate}, \code{conf.low},
+\code{conf.high}, and \code{std.error}
 }
 \description{
 Tidy method for objects of class "targeted_msm"

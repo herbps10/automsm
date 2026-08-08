@@ -10,11 +10,13 @@ Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports: 
     adaptMCMC,
+    checkmate,
+    cli,
     generics,
+    glue,
     mvtnorm,
     origami,
     purrr,
-    stringr,
     SuperLearner,
     tibble,
     torch

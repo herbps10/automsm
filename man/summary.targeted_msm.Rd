@@ -2,15 +2,21 @@
 % Please edit documentation in R/summary.r
 \name{summary.targeted_msm}
 \alias{summary.targeted_msm}
-\title{Summary method for class "targeted_msm"}
+\title{Summary method for objects of class "targeted_msm"}
 \usage{
 \method{summary}{targeted_msm}(object, ...)
 }
 \arguments{
-\item{object}{object of class "targeted_msm"}
+\item{object}{An object of class \code{"targeted_msm"}}
 
-\item{...}{additional arguments (not currently used)}
+\item{...}{Additional arguments (not currently used)}
+}
+\value{
+An object of class \code{"summary.targeted_msm"}: a
+list containing the esetimand label, sample size, working-model
+term names, and a list of coefficient tables (one per available
+estimator: plug-in, one-step, and optionally TMLE).
 }
 \description{
-Summary method for class "targeted_msm"
+Summary method for objects of class "targeted_msm"
 }

@@ -3,7 +3,7 @@
 tmle_mle <- function(p, fluctuation_model, ...) {
   epsilon <- torch::torch_tensor(rep(0, p), requires_grad = TRUE)
   optimizer <- torch::optim_lbfgs(epsilon)
-  for(iter in 1:2) {
+  for (iter in 1:2) {
     optimizer$step(function() {
       optimizer$zero_grad()
       target <- fluctuation_model(epsilon, ...)

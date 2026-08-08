@@ -2,26 +2,31 @@
 % Please edit documentation in R/predict.r
 \name{predict.targeted_msm}
 \alias{predict.targeted_msm}
-\title{Predict from non-parametric marginal structural model}
+\title{Predict from a "targeted_msm" object}
 \usage{
 \method{predict}{targeted_msm}(object, newdata, estimator = "tmle", type = "point", ...)
 }
 \arguments{
-\item{object}{object of class "targeted_msm"}
+\item{object}{An object of class \code{"targeted_msm"}.}
 
-\item{newdata}{data frame of new data}
+\item{newdata}{A data frame of new data.}
 
-\item{estimator}{which estimator to use for predictions: "onestep", "bayes", or "tmle" (the default).}
+\item{estimator}{Which estimator to use for predictions:
+\code{"onestep"}, \code{"bayes"},
+or \code{"tmle"} (default). Note that the \code{"bayes"} estimator
+is not available for the \code{"longitudinal_treatment"} estimand.}
 
-\item{type}{type of prediction; "point" for point estimates, "joint" for draws from joint distribution.}
+\item{type}{Type of prediction; \code{"point"} for point estimates,
+\code{"joint"} for draws from joint distribution.}
 
-\item{...}{additional arguments (not currently used)}
+\item{...}{Additional arguments (not currently used).}
 }
 \value{
-For predictions of type "point", a vector of predictions is returned.
-For predictions of type "joint", a list is returned, where each element is a vector of
-predictions for the corresponding row of newdata.
+For predictions of type \code{"point"}, a vector of predictions is
+returned. For predictions of type \code{"joint"}, a list is returned, where
+each element is a vector of predictions for the corresponding row of
+\code{newdata}
 }
 \description{
-Predict from non-parametric marginal structural model
+Evaluates the fitted working model at supplied design points.
 }

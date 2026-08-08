@@ -1,40 +1,49 @@
 #' Tidy method for objects of class "targeted_msm"
-#' @param x object of class "targeted_msm"
-#' @param ... additional arguments (not currently used)
+#' @param x An object of class \code{"targeted_msm"}
+#' @param ... Additional arguments (not currently used)
+#' @return A tibble with one row per (estimator, term) combination and columns
+#'   \code{estimator}, \code{term}, \code{estimate}, \code{conf.low},
+#'   \code{conf.high}, and \code{std.error}
 #' @importFrom generics tidy
 #' @importFrom stats median quantile sd
 #' @importFrom tibble tibble
-#' @export
+#' @importFrom purrr map compact list_rbind
+#' @exportS3Method tidy targeted_msm
 tidy.targeted_msm <- function(x, ...) {
-  results <- tibble::tibble(
-    estimator = "onestep",
-    term      = x$terms,
-    estimate  = x$onestep$est,
-    conf.low  = x$onestep$lower,
-    conf.high = x$onestep$upper,
-    std.error = x$onestep$se
-  )
+  terms <- x$terms
 
-  if(!is.null(x$tmle)) {
-    results <- rbind(results, tibble::tibble(
-      estimator = "tmle",
-      term      = x$terms,
-      estimate  = x$tmle$est,
-      conf.low  = x$tmle$lower,
-      conf.high = x$tmle$upper,
-      std.error = x$tmle$se
-    ))
+  tidy_estimator <- function(est, label) {
+    if(is.null(est)) return(NULL)
 
-    if(!is.null(x$tmle$samples)) {
-      results <- rbind(results, tibble::tibble(
-        estimator = "bayestmle",
-        term      = x$terms,
-        estimate  = as.numeric(apply(x$tmle$samples, 3, stats::median)),
-        conf.low  = as.numeric(apply(x$tmle$samples, 3, stats::quantile, 0.025)),
-        conf.high = as.numeric(apply(x$tmle$samples, 3, stats::quantile, 0.975)),
-        std.error = as.numeric(apply(x$tmle$samples, 3, stats::sd))
-      ))
-    }
+    tibble::tibble(
+      estimator = label,
+      term = terms,
+      estimate = as.numeric(est$est),
+      conf.low = as.numeric(est$lower),
+      conf.high = as.numeric(est$upper),
+      std.error = as.numeric(est$se)
+    )
   }
-  results
+
+  tidy_samples <- function(samples, label, margin = 3) {
+    if(is.null(samples)) return(NULL)
+    tibble::tibble(
+      estimator = label,
+      term = terms,
+      estimate = as.numeric(apply(samples, margin, stats::median)),
+      conf.low = as.numeric(apply(samples, margin, stats::quantile, 0.025)),
+      conf.high = as.numeric(apply(samples, margin, stats::quantile, 0.975)),
+      std.error = as.numeric(apply(samples, margin, stats::sd)),
+    )
+  }
+
+  purrr::list_rbind(purrr::compact(list(
+    tidy_estimator(x$onestep, "onestep"),
+    tidy_estimator(x$tmle, "tmle"),
+    tidy_samples(x$tmle$samples, "bayestmle")
+  )))
 }
+
+#' @importFrom generics tidy
+#' @export
+generics::tidy

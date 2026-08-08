@@ -11,9 +11,33 @@
 ## Overview
 
 The `TargetedMSM` package provides targeted estimation for a general
-class of Non-parametric Marginal Structural Models (NP-MSMs). The
-package relies on automatic differentiation to estimtae NP-MSMs with
-arbitrary user-supplied working models and loss functions.
+class of Non-parametric Marginal Structural Models (NP-MSMs). An NP-MSM
+summarizes a high-dimensional target functional (such as a conditional
+average treatment effect) by projecting it onto a lower-dimensional
+working model with respect to a loss function, without assuming the
+working model is correctly specified.
+
+The package supports arbitrary user-supplied working models and loss
+functions. This flexibility is made possible by **automatic
+differentiation** via the [`torch`](https://torch.mlverse.org/) package,
+which computes the derivatives of the working model and loss function
+needed to form the efficient influence function of the target
+parameters.
+
+## Supported estimands and estimators
+
+The package currently supports three estimands, each summarizing a
+different target functional. For each estimand, one or more estimators
+are available: a one-step estimator, a Targeted Minimum Loss-Based
+Estimator (TMLE), and a Generalized Bayesian TMLE. All three estimators
+are asymptotically efficient; see the vignettes for further discussion
+of their differences.
+
+| Estimand | Function | One-step | TMLE | Bayesian TMLE |
+|----|----|:--:|:--:|:--:|
+| Conditional Average Treatment Effect (CATE) | `treatment_effect_modification` | ✓ | ✓ | ✓ |
+| Categorical dose-response function | `categorical_dose_response` | ✓ | ✓ | ✓ |
+| Longitudinal treatment effects | `longitudinal_treatment` | ✓ | ✓ |  |
 
 ## Installation
 
@@ -27,65 +51,13 @@ pak::pak("herbps10/TargetedMSM")
 
 ## Example
 
-Estimate a linear working model with squared error loss function for
-summarizing a dose-response curve:
+The following example estimates a linear working model with a
+squared-error loss function to summarize how a Conditional Average
+Treatment Effect (CATE) varies with a treatment effect modifier:
 
 ``` r
 library(TargetedMSM)
 
-set.seed(10016)
-data <- simulate_categorical_dose_response(N = 500)
-
-fit <- categorical_dose_response(
-  data,
-  c("X1", "X2"),
-  "A",
-  "Y",
-  formula = ~1 + A,
-  outcome_type = "continuous",
-  learners_trt = c("SL.glm.interaction"),
-  learners_outcome = c("SL.glm.interaction"),
-  loss = loss_squared_error,
-  working_model = function(beta, X) beta[1]$mul(X[, 2]$pow(beta[2]))
-)
-#> Loading required package: nnls
-
-summary(fit)
-#> Marginal Structural Model: Categorical Dose-Response Function
-#> One-step estimator
-#>     Est      SE    2.5%   97.5%
-#>    1.83    0.25    1.34    2.32 
-#>   -0.99    0.12   -1.22   -0.76 
-#> TMLE estimator
-#>     Est      SE    2.5%   97.5%
-#>    1.63     0.2    1.23    2.02 
-#>    -0.7    0.24   -1.16   -0.24
-```
-
-Predict from the estimated NP-MSM and plot results:
-
-``` r
-library(purrr)
-library(ggplot2)
-
-pred <- data.frame(A = 1:25)
-pred$point <- predict(fit, pred)
-pred$lower <- map_dbl(predict(fit, pred, type = "joint"), quantile, 0.025)
-pred$upper <- map_dbl(predict(fit, pred, type = "joint"), quantile, 0.975)
-
-ggplot(pred, aes(A, point)) +
-  geom_line() +
-  geom_line(aes(y = lower), lty = 2) +
-  geom_line(aes(y = upper), lty = 2) +
-  labs(x = "A", y = "Counterfactual mean", title = "Estimated dose-response curve")
-```
-
-<img src="man/figures/README-plot-1.png" alt="" width="75%" />
-
-Estimating a linear working model with squared error loss function for
-summarizing Conditional Average Treatment Effects:
-
-``` r
 set.seed(10016)
 data <- simulate_treatment_effect_modification(N = 500)
 
@@ -101,15 +73,22 @@ fit <- treatment_effect_modification(
   loss = loss_squared_error,
   working_model = working_model_linear
 )
+#> Loading required package: nnls
 
 summary(fit)
-#> Marginal Structural Model: Treatment Effect Modification
-#> One-step estimator
-#>     Est      SE    2.5%   97.5%
-#>    0.01    0.02   -0.03    0.04 
-#>    1.03    0.04    0.96    1.09 
-#> TMLE estimator
-#>     Est      SE    2.5%   97.5%
-#>       0    0.02   -0.04    0.04 
-#>    1.03    0.04    0.96     1.1
+#> 
+#> ── Targeted MSM: treatment effect modification ─────────────────────────────────
+#> n = 500
+#> 
+#> ── One-step estimator ──
+#> 
+#>         Term    Est    SE   2.5%  97.5%
+#>  (Intercept)  0.944 0.062  0.823  1.066
+#>           X2 -1.929 0.115 -2.155 -1.704
+#> 
+#> ── TMLE estimator ──
+#> 
+#>         Term    Est    SE   2.5%  97.5%
+#>  (Intercept)  0.948 0.062  0.827  1.069
+#>           X2 -1.939 0.115 -2.164 -1.714
 ```

@@ -7,9 +7,12 @@
 \method{print}{targeted_msm}(x, ...)
 }
 \arguments{
-\item{x}{object of class "targeted_msm"}
+\item{x}{An object of class \code{targeted_msm}}
 
-\item{...}{additional arguments (not currently used)}
+\item{...}{Additional arguments (not currently used)}
+}
+\value{
+\code{x}, invisibly
 }
 \description{
 Print method for objects of class "targeted_msm"

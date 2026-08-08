@@ -19,18 +19,39 @@ library(TargetedMSM)
 library(ggplot2)
 ```
 
-This vignette illustrates how to use the `TargetedMSM` package to estimate a Non-parametric Marginal Structural Model to summarize the relationship between a Conditional Average Treatment Effect (CATE) and a set of treatment effect modifiers.
+This vignette illustrates how to use the `TargetedMSM` package to estimate a 
+Non-parametric Marginal Structural Model (NP-MSM) to summarize the relationship 
+between a Conditional Average Treatment Effect (CATE) and a set of treatment effect modifiers.
 
-The package has a built in function to generate simulated data for this setting. To begin, let's generate $500$ observations.
+The key idea throughout is that the working model (e.g. linear, B-spline, etc.) is
+**not** an assumption about the true functional form of the CATE. Instead,
+the NP-MSM targets the *best approximation* of the CATE within the working model,
+as defined by the loss function. This distinguishes NP-MSMs from classical MSMs:
+we make no parametric assumption on the CATE itself, and the 
+resulting coefficients are interpreted as the best summary of the CATE
+achievable within the chosen working model.
+
+## Two frequentist estimators
+
+The `TargetedMSM` package provides two frequentist estimators of NP-MSM parameters: a **one-step** estimator and a **Targeted Minimum Loss-Based Estimator (TMLE)**.
+Both estimators are asymptotically normal and efficient, meaning they achieve
+the smallest asymptotic variance possible among regular estimators. Both estimators are also double-robust: they remain consistent if either the propensity model or the outcome model is correctly specified.
+
+##  Simulated data
+The package has a built in function to generate simulated data for this setting. 
+To begin, let's generate $500$ observations.
 ```{r}
-data <- simulate_treatment_effect_modification(N = 500, seed = 1)
+data <- simulate_treatment_effect_modification(N = 500, seed = 10016)
 
 head(data)
 ```
+
 The columns of the simulated dataset are
+
 - `X1`, `X2`: continuous covariates.
 - `A`: binary treatment variable ($A = 0$ indicates control, and $A = 1$ indicates treatment).
 - `Y`: a continuous outcome variable.
+
 For convenience, we will write $X = (X_1, X_2)$ to denote the set of both covariates.
 
 ```{r}
@@ -38,14 +59,25 @@ ggplot(data, aes(X2, Y, color = factor(A))) +
   geom_point()
 ```
 
-The _Conditional Average Treatment Effect_ (CATE) is defined as $\psi(X) = \mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]$. Under appropriate causal assumptions, the CATE can be interpreted as the average causal effect of treatment versus control for those with covariates values $X$. 
+The _Conditional Average Treatment Effect_ (CATE) is defined as
+$\psi(X) = \mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]$. 
+Under appropriate causal assumptions, the CATE can be interpreted as the average
+causal effect of treatment versus control for those with covariates values $X$. 
 
-For high-dimensional covariates $X$, the CATE may be difficult to estimate. One popular parameter for summarizing the CATE is to estimate the _Average Treatment Effect_ (ATE), which is the CATE averaged over the population distribution. Formally, the CATE is defined as $\psi^{\mathsf{ATE}} = \mathbb{E}[\mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]]$.
+For high-dimensional covariates $X$, the CATE may be difficult to estimate. 
+One popular parameter for summarizing the CATE is to estimate the _Average Treatment Effect_ 
+(ATE), which is the CATE averaged over the population distribution. Formally, the ATE is 
+defined as $\psi^{\mathsf{ATE}} = \mathbb{E}[\mathbb{E}[Y \mid A = 1, X] - \mathbb{E}[Y \mid A = 0, X]]$.
+In the NP-MSM framework, the ATE corresponds to the special case of a linear working model
+containing only an intercept term (that is, when no effect modifiers are included).
+
+
+## Estimating the ATE
 
 The ATE can be estimated using the `treatment_effect_modification` function.
 First, we need to set the SuperLearner methods that will be used to estimate the required nuisance parameters.
 ```{r}
-learners <- "SL.glm.interaction"
+learners <- "SL.gam"
 ```
 
 Then, we can estimate the ATE:
@@ -66,9 +98,13 @@ The results can be viewed using the `summary` function:
 ```{r}
 summary(fit_ate)
 ```
-The TMLE estimate of the ATE is $0.49$ (95\% CI: $0.47$ - $0.51$).
+As shown in the summary above, the TMLE estimate of the ATE is approximately
+`r round(fit_ate$tmle$est[1], 2)` (95% CI: 
+`r round(fit_ate$tmle$lower[1], 2)` -- `r round(fit_ate$tmle$upper[1], 2)`).
 
-We may also be interested in summarizing how the CATE changes as a function of the covariates. Suppose we are interested in $X_2$ as a _treatment effect modifier_. One way to investigate this is to summarize the relationship between the CATE and $X_2$ in terms of a linear working model that minimizes the squared error between the CATE and the working model predictions:
+## Summarizing effect modification
+We may also be interested in summarizing how the CATE changes as a functio of the covariates. Suppose we are interested in $X_2$ as a _treatment effect modifier_. 
+One way to investigate this is to summarize the relationship between the CATE and $X_2$ in terms of a linear working model that minimizes the squared error between the CATE and  the working model predictions:
 ```{r}
 fit <- treatment_effect_modification(
   data,
@@ -77,31 +113,43 @@ fit <- treatment_effect_modification(
   "Y",
   formula = ~1 + X2,
   outcome_type = "continuous",
-  learners_trt = c("SL.glm.interaction"),
-  learners_outcome = c("SL.glm.interaction"),
+  learners_trt = learners,
+  learners_outcome = learners,
   working_model = working_model_linear,
   loss = loss_squared_error
 )
 ```
+
 We can view the estimated NP-MSM coefficients using `summary`:
+
 ```{r}
 summary(fit)
 ```
 
-Next, let's use the estimated NP-MMS to make predictions on the treatment effect for a range of values of $X_2$:
+Next, let's use the estimated NP-MSM to make predictions on the treatment effect for a range of values of $X_2$:
 ```{r}
 pred <- data.frame(X2 = seq(0, 1, 0.1))
-pred$point <- predict(fit, newdata)
+pred$point <- predict(fit, newdata = pred, estimator = "tmle")
 
 ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
   geom_line() +
-  geom_function(fun = function(x) x, aes(color = "True"))
-  ylab("Treatment Effect")
+  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True")) +
+  ylab("Treatment Effect") +
+  theme(legend.position = "bottom")
 ```
 
-We can also make 95\% confidence intervals:
+Because the true CATE is non-linear, it cannot be represented exactly by a straight line. The linear working model therefore 
+does not recover the true CATE; instead, it returns the best linear _summary_ of the CATE under a squared-error loss.
+This illustrates a central feature of NP-MSMs: the linear coefficient is interpetable as the best linear projection of the CATE,
+and it makes no assumption that the CATE is truly linear. 
+
+
+We can also make 95\% confidence intervals. Setting `type = "joint"` returns, for 
+each row of the new data, a vector of draws from the joint sampling distribution 
+of the working-model predictions; we summarize these draws by their 2.5% and
+97.5% quantiles to form pointwise 95% intervals.
 ```{r}
-pred$ci <- predict(fit, newdata, type = "joint")
+pred$ci <- predict(fit, pred, type = "joint")
 pred$lower <- purrr::map_dbl(pred$ci, quantile, 0.025)
 pred$upper <- purrr::map_dbl(pred$ci, quantile, 0.975)
 
@@ -109,11 +157,45 @@ ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
   geom_line() +
   geom_line(aes(y = lower), lty = 2) +
   geom_line(aes(y = upper), lty = 2) +
-  geom_function(fun = function(x) x, aes(color = "True"))
-  ylab("Treatment Effect")
+  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True"))
+  ylab("Treatment Effect") +
+  labs(color = NULL) +
+  theme(legend.position = "bottom")
 ```
 
-Suppose that we wish to fit a more flexible NP-MSM. For example, we could use a working model based on B-splines:
+## Comparing the one-step and TMLE estimators
+
+Both frequentist estimators are available from the same fitted object. We can extract each estimator's predictions by passing the `estimator` argument to `predict`, and overlay them to compare. Because both estimators are asymptotically efficient, we expect them to reach substantially the same conclusion, particularly as the sample size grows.
+
+```{r}
+compare <- data.frame(X2 = seq(0, 1, 0.1))
+compare$tmle <- predict(fit, compare, estimator = "tmle")
+compare$onestep <- predict(fit, compare, estimator = "onestep")
+
+ggplot(compare, aes(X2)) +
+  geom_line(aes(y = tmle, color = "TMLE")) +
+  geom_line(aes(y = onestep, color = "One-step")) +
+  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True")) +
+  ylab("Treatment Effect") +
+  labs(color = NULL) +
+  theme(legend.position = "bottom")
+```
+
+We can als ocompare the estimated working-model coefficients directly. The `tidy` method returns a tibble with one row per estimator and working model term, allowing for straightforward comparisons:
+
+```{r}
+tidy(fit)
+```
+
+The one-step and TMLE coefficient estimates and their confidence intervals should be similar, reflecting that they both share good asymptotic properties. Any differences observed here are finite-sample effects.
+
+## A more flexible working model
+
+The linear summary above doesn't capture the interesting non-linear structure of the treatment effect.
+If we wish to capture how the CATE varies with $X_2$ more faithfully, we can project onto
+a more flexible working model. A B-spline working model has the same interpretation
+as the best approximation of the CATE under a working model for the squared error loss,
+but has greater flexibility to capture the nonlinear shape of the TRUE CATE.
 ```{r}
 fit_splines <- treatment_effect_modification(
   data,
@@ -122,8 +204,8 @@ fit_splines <- treatment_effect_modification(
   "Y",
   formula = ~1 + splines::bs(X2, Boundary.knots = c(0, 1), knots = seq(0, 0.75, 0.25)),
   outcome_type = "continuous",
-  learners_trt = c("SL.glm.interaction"),
-  learners_outcome = c("SL.glm.interaction"),
+  learners_trt = learners,
+  learners_outcome = learners,
   working_model = working_model_linear,
   loss = loss_squared_error
 )
@@ -131,9 +213,9 @@ fit_splines <- treatment_effect_modification(
 
 And now plot the resulting predictions:
 ```{r}
-pred_splines <- data.frame(X2 = seq(0, 1, 0.1))
-pred_splines$point <- predict(fit_splines, newdata)
-pred_splines$ci <- predict(fit_splines, newdata, type = "joint")
+pred_splines <- data.frame(X2 = seq(0, 1, 0.01))
+pred_splines$point <- predict(fit_splines, pred_splines)
+pred_splines$ci <- predict(fit_splines, pred_splines, type = "joint")
 pred_splines$lower <- purrr::map_dbl(pred_splines$ci, quantile, 0.025)
 pred_splines$upper <- purrr::map_dbl(pred_splines$ci, quantile, 0.975)
 
@@ -141,6 +223,11 @@ ggplot(pred_splines, aes(X2, point, color = "TMLE Estimate")) +
   geom_line() +
   geom_line(aes(y = lower), lty = 2) +
   geom_line(aes(y = upper), lty = 2) +
-  geom_function(fun = function(x) x, aes(color = "True")) +
-  ylab("Treatment Effect")
+  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True")) +
+  ylab("Treatment Effect") +
+  labs(color = NULL) +
+  theme(legend.position = "none")
 ```
+
+Unlike in the linear summary, the B-spline fit recovers the rising-and-falling shape
+of the true CATE, demonstrating the advantage of a richer working model.

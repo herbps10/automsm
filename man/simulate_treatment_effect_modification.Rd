@@ -7,15 +7,20 @@
 simulate_treatment_effect_modification(N = 1000, sigma = 0.1, seed = NULL)
 }
 \arguments{
-\item{N}{sample size}
+\item{N}{Sample size.}
 
-\item{sigma}{conditional standard deviation of outcome}
+\item{sigma}{Conditional standard deviation of the outcome.}
 
-\item{seed}{random number seed (optional)}
+\item{seed}{Random number seed (optional).}
 }
 \value{
-data frame of simulated data
+data frame of simulated data with columns \code{X1}, \code{X2},
+\code{A}, and \code{Y}.
 }
 \description{
-Simulate example data for the treatment effect modification NP-MSM.
+The true conditonal average treatment effect (CATE) is a nonlinear
+function of \code{X2}, namely \eqn{\psi(X) = \sin(2 \pi X_2)}. This allows
+the linear working model to be interpreted as the best linear (squared-error)
+summary of the CATE, while a more flexible working model can
+track the nonlinear shape.
 }

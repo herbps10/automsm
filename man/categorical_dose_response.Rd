@@ -2,7 +2,7 @@
 % Please edit documentation in R/categorical_dose_response.r
 \name{categorical_dose_response}
 \alias{categorical_dose_response}
-\title{Non-parametric marginal structural model estimatino for categorical dose-response curves.}
+\title{Non-parametric marginal structural model estimation for categorical dose-response curves.}
 \usage{
 categorical_dose_response(
   data,
@@ -23,42 +23,50 @@ categorical_dose_response(
   bayes = FALSE,
   bayes_draws = 1000,
   bayes_chains = 4,
-  bayes_prior = function(beta) sum(stats::dnorm(as.numeric(beta), mean = 0, sd = 1, log =
-    TRUE)),
+  bayes_prior = function(beta) {
+     sum(stats::dnorm(as.numeric(beta), mean = 0, sd =
+    1, log = TRUE))
+ },
   epsilon = 1e-05,
   nuisance = NULL
 )
 }
 \arguments{
-\item{data}{data frame}
+\item{data}{A \code{data.frame} containing the columns referenced by \code{X},
+\code{A}, and \code{Y}.}
 
-\item{X}{covariate columns}
+\item{X}{A character vector giving the covariate column names in \code{data}.}
 
-\item{A}{treatment column}
+\item{A}{A string naming the treatment column in \code{data}.}
 
-\item{Y}{outcome column}
+\item{Y}{A string naming the outcome column in \code{data}.}
 
-\item{formula}{marginal structural model design matrix formula}
+\item{formula}{A model formula specifying the marginal structural working-model design matrix.}
 
-\item{outcome_type}{outcome type ("continuous" or "binomial")}
+\item{outcome_type}{Outcome type, either \code{"continuous"} or \code{"binomial"}.}
 
-\item{loss}{marginal structural model loss function}
+\item{loss}{The marginal structural model loss function measuring the fidelity of the
+working model to the target functional (e.g. \code{loss_squared_error}).}
 
-\item{working_model}{model marginal structural model working model}
+\item{working_model}{The marginal structural model working model (e.g. \code{working_model_linear}).}
 
-\item{learners_trt}{SuperLearner libraries for estimating propensity score}
+\item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
+the propensity scores.}
 
-\item{learners_outcome}{SuperLearner libraries for estimating outcome regression}
+\item{learners_outcome}{A character vector of \pkg{SuperLearner} libraries for
+estimating the outcome regressions.}
 
-\item{outer_folds}{number of folds in outer cross-fitting loop}
+\item{outer_folds}{Number of folds in the outer cross-fitting loop.}
 
-\item{inner_folds}{number of folds for inner SuperLearner cross-validation within each outer cross-fitting loop}
+\item{inner_folds}{Number of folds for the inner \pkg{SuperLearner} cross-validation
+within each outer cross-fitting fold.}
 
-\item{tmle}{whether to run TMLE estimator (TRUE/FALSE)}
+\item{tmle}{Logical; whether to run the TMLE estimator.}
 
-\item{tmle_maxiter}{maximum number of TMLE iterations}
+\item{tmle_maxiter}{Maximum number of TMLE iterations.}
 
-\item{tmle_linear}{whether to use linear TMLE fluctuation model (TRUE) or logistic fluctuation model (FALSE)}
+\item{tmle_linear}{Logical; whether to use a linear TMLE fluctuation model
+(\code{TRUE}) or a logistic fluctuation model (\code{FALSE}).}
 
 \item{bayes}{whether to run Bayesian TMLE estimator}
 
@@ -68,10 +76,34 @@ categorical_dose_response(
 
 \item{bayes_prior}{prior to apply to marginal structural model parameters}
 
-\item{epsilon}{adjustment for estimated values close to zero or one}
+\item{epsilon}{Adjustment bounding estimated propensities/means away from 0 and 1.}
 
-\item{nuisance}{list of nuisance parameters}
+\item{nuisance}{Optional list of pre-computed nuisance parameters. If \code{NULL}
+(the default), nuisance parameters are estimated internally via cross-fitting.}
+}
+\value{
+An object of class \code{"targeted_msm"}: a list with components
+\describe{
+\item{estimand}{Character string, \code{"categorical_dose_response"}.}
+\item{p}{Number of working-model coefficients.}
+\item{n}{Sample size.}
+\item{tau}{Number of treatment timepoints \eqn{\tau}.}
+\item{formula}{The working-model formula used.}
+\item{working_model, loss}{The working model and loss function used.}
+\item{terms}{Character vector of working-model design-matrix term names.}
+\item{learners_trt, learners_outcome}{The \pkg{SuperLearner} libraries used.}
+\item{nuisance}{The (estimated or supplied) nuisance parameters.}
+\item{plugin}{A list with the plug-in piont estimate (\code{est}).}
+\item{onestep}{A list with the one-step point estimate (\code{est}), standard
+errors (\code{se}), confidence-interval bounds (\code{lower}, \code{upper}),
+the estimated efficient influence function (\code{eif}), the projected
+conditional means (\code{psi}), and joint draws (\code{joint_draws}).}
+}
 }
 \description{
-Non-parametric marginal structural model estimatino for categorical dose-response curves.
+Non-parametric marginal structural model estimation for categorical dose-response curves.
+}
+\seealso{
+\code{\link{categorical_dose_response}} for the analogous estimator with a
+high-dimensional (categorical) point treatment.
 }
