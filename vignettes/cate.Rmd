@@ -1,8 +1,8 @@
 ---
-title: "Treatment Effect Modification"
+title: "Conditional Average Treatment Effect"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Treatment Effect Modification}
+  %\VignetteIndexEntry{Conditional Average Treatment Effect}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -15,11 +15,11 @@ knitr::opts_chunk$set(
 ```
 
 ```{r setup}
-library(TargetedMSM)
+library(automsm)
 library(ggplot2)
 ```
 
-This vignette illustrates how to use the `TargetedMSM` package to estimate a 
+This vignette illustrates how to use the `automsm` package to estimate a 
 Non-parametric Marginal Structural Model (NP-MSM) to summarize the relationship 
 between a Conditional Average Treatment Effect (CATE) and a set of treatment effect modifiers.
 
@@ -33,7 +33,7 @@ achievable within the chosen working model.
 
 ## Two frequentist estimators
 
-The `TargetedMSM` package provides two frequentist estimators of NP-MSM parameters: a **one-step** estimator and a **Targeted Minimum Loss-Based Estimator (TMLE)**.
+The `automsm` package provides two frequentist estimators of NP-MSM parameters: a **one-step** estimator and a **Targeted Minimum Loss-Based Estimator (TMLE)**.
 Both estimators are asymptotically normal and efficient, meaning they achieve
 the smallest asymptotic variance possible among regular estimators. Both estimators are also double-robust: they remain consistent if either the propensity model or the outcome model is correctly specified.
 
@@ -41,7 +41,7 @@ the smallest asymptotic variance possible among regular estimators. Both estimat
 The package has a built in function to generate simulated data for this setting. 
 To begin, let's generate $500$ observations.
 ```{r}
-data <- simulate_treatment_effect_modification(N = 500, seed = 10016)
+data <- simulate_cate(N = 500, seed = 10016)
 
 head(data)
 ```
@@ -74,7 +74,7 @@ containing only an intercept term (that is, when no effect modifiers are include
 
 ## Estimating the ATE
 
-The ATE can be estimated using the `treatment_effect_modification` function.
+The ATE can be estimated using the `cate` function.
 First, we need to set the SuperLearner methods that will be used to estimate the required nuisance parameters.
 ```{r}
 learners <- "SL.gam"
@@ -82,7 +82,7 @@ learners <- "SL.gam"
 
 Then, we can estimate the ATE:
 ```{r}
-fit_ate <- treatment_effect_modification(
+fit_ate <- cate(
   data,
   c("X1", "X2"),
   "A",
@@ -106,7 +106,7 @@ As shown in the summary above, the TMLE estimate of the ATE is approximately
 We may also be interested in summarizing how the CATE changes as a functio of the covariates. Suppose we are interested in $X_2$ as a _treatment effect modifier_. 
 One way to investigate this is to summarize the relationship between the CATE and $X_2$ in terms of a linear working model that minimizes the squared error between the CATE and  the working model predictions:
 ```{r}
-fit <- treatment_effect_modification(
+fit <- cate(
   data,
   c("X1", "X2"),
   "A",
@@ -138,7 +138,7 @@ ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
   theme(legend.position = "bottom")
 ```
 
-Because the true CATE is non-linear, it cannot be represented exactly by a straight line. The linear working model therefore 
+Because the true CATE is nonlinear, it cannot be represented exactly by a straight line. The linear working model therefore 
 does not recover the true CATE; instead, it returns the best linear _summary_ of the CATE under a squared-error loss.
 This illustrates a central feature of NP-MSMs: the linear coefficient is interpetable as the best linear projection of the CATE,
 and it makes no assumption that the CATE is truly linear. 
@@ -197,7 +197,7 @@ a more flexible working model. A B-spline working model has the same interpretat
 as the best approximation of the CATE under a working model for the squared error loss,
 but has greater flexibility to capture the nonlinear shape of the TRUE CATE.
 ```{r}
-fit_splines <- treatment_effect_modification(
+fit_splines <- cate(
   data,
   c("X1", "X2"),
   "A",

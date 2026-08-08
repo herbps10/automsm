@@ -1,4 +1,4 @@
-#' Simulate example data for the treatment effect modification NP-MSM.
+#' Simulate example data for the Conditional Average Treatment Effect NP-MSM.
 #'
 #' The true conditonal average treatment effect (CATE) is a nonlinear
 #' function of \code{X2}, namely \eqn{\psi(X) = \sin(2 \pi X_2)}. This allows
@@ -13,7 +13,7 @@
 #'   \code{A}, and \code{Y}.
 #' @importFrom stats runif rbinom rnorm plogis
 #' @export
-simulate_treatment_effect_modification <- function(
+simulate_cate <- function(
     N = 1e3,
     sigma = 0.1,
     seed = NULL
@@ -44,7 +44,7 @@ simulate_treatment_effect_modification <- function(
 #' @return data frame of simulated data
 #' @importFrom stats runif rnorm
 #' @export
-simulate_categorical_dose_response <- function(
+simulate_dose_response <- function(
   N = 1e3,
   treatments = 25,
   sigma = 0.1,
@@ -62,7 +62,7 @@ simulate_categorical_dose_response <- function(
   data.frame(X1, X2, A, Y)
 }
 
-#' Simulate example data for the longitudinal treatment NP-MSM
+#' Simulate example data for the longitudinal dose-response NP-MSM
 #'
 #' Simulates a longitudinal data structure with time-varying binary treatments
 #' (A_1, ..., A_tau), a single time-varying covariate per time point
@@ -81,7 +81,7 @@ simulate_categorical_dose_response <- function(
 #' @return data frame of simulated dta with columns L_1, A_1, ..., L_tau, A_tau, Y
 #' @importFrom stats runif rbinom rnorm plogis
 #' @export
-simulate_longitudinal_treatment <- function(
+simulate_longitudinal_dose_response <- function(
   N = 1e3,
   tau = 3,
   beta0 = -1,

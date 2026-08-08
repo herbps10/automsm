@@ -19,9 +19,9 @@ print.targeted_msm <- function(x, ...) {
 targeted_msm_label <- function(estimand) {
   switch(
     estimand,
-    treatment_effect_modification = "treatment effect modification",
-    categorical_dose_response = "categorical dose-response function",
-    longitudinal_treatment = "longitudinal treatment",
+    cate = "conditional average treatment effect",
+    dose_response = "dose-response",
+    longitudinal_dose_response = "longitudinal dose-response",
     estimand
   )
 }

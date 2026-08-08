@@ -1,5 +1,5 @@
-Package: TargetedMSM
-Title: Targeted estimators of Non-parametric Marginal Structural Models
+Package: automsm
+Title: Automatic Targeted estimators of Non-parametric Marginal Structural Models
 Version: 0.1
 Authors@R: 
     person("Herbert", "Susmann", , "herbps10@gmail.com", role = c("aut", "cre"))

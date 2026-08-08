@@ -7,6 +7,6 @@
 # * https://testthat.r-lib.org/articles/special-files.html
 
 library(testthat)
-library(TargetedMSM)
+library(automsm)
 
-test_check("TargetedMSM")
+test_check("automsm")

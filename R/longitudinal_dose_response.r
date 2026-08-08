@@ -1,4 +1,4 @@
-#' Estimate a Non-parametric Marginal Structural Model for Longitudinal Treatments
+#' Estimate a Non-parametric Marginal Structural Model for Longitudinal Dose Response
 #'
 #' Fits a non-parametric marginal structural model (NP-MSM) summarizing the mean
 #' outcome under static longitudinal treatment trajectories \eqn{\bar{a} \in \{0, 1\}^\tau}.
@@ -71,7 +71,7 @@
 #'
 #' @return An object of class \code{"targeted_msm"}: a list with components
 #'   \describe{
-#'     \item{estimand}{Character string, \code{"longitudinal_treatment"}.}
+#'     \item{estimand}{Character string, \code{"longitudinal_dose_response"}.}
 #'     \item{p}{Number of working-model coefficients.}
 #'     \item{n}{Sample size.}
 #'     \item{tau}{Number of treatment timepoints \eqn{\tau}.}
@@ -93,15 +93,15 @@
 #' Marginal Structural Working Models. \emph{Journal of Causal Inference}, 2(2):147-185.
 #' \doi{10.1515/jci-2013-0007}
 #'
-#' @seealso \code{\link{categorical_dose_response}} for the analogous estimator with a
+#' @seealso \code{\link{dose_response}} for the analogous estimator with a
 #'   high-dimensional (categorical) point treatment.
 #'
 #' @examples
 #' \dontrun{
 #' # Simulate longitudinal data with tau = 2 treatment timepoints
-#' data <- simulate_longitudinal_treatment(N = 500, tau = 2)
+#' data <- simulate_longitudinal_dose_response(N = 500, tau = 2)
 #'
-#' fit <- longitudinal_treatment(
+#' fit <- longitudinal_dose_response(
 #'   data = data,
 #'   Ls = list(c("L1"), c("L2")),
 #'   As = c("A1", "A2"),
@@ -116,7 +116,7 @@
 #' @importFrom adaptMCMC MCMC
 #'
 #' @export
-longitudinal_treatment <- function(
+longitudinal_dose_response <- function(
   data,
   Ls,
   As,
@@ -210,7 +210,7 @@ longitudinal_treatment <- function(
   }
 
   if (is.null(nuisance)) {
-    nuisance <- estimate_longitudinal_treatment_nuisance(
+    nuisance <- estimate_longitudinal_dose_response_nuisance(
       data,
       Ls,
       As,
@@ -456,7 +456,7 @@ longitudinal_treatment <- function(
   }
 
   res <- list(
-    estimand = "longitudinal_treatment",
+    estimand = "longitudinal_dose_response",
     p = p,
     n = n,
     tau = tau,
@@ -560,7 +560,7 @@ cumulative_propensity_scores <- function(regimes, pi1) {
 
 #' @importFrom SuperLearner SuperLearner predict.SuperLearner
 #' @noRd
-estimate_longitudinal_treatment_propensity_scores <- function(
+estimate_longitudinal_dose_response_propensity_scores <- function(
   data,
   Ls,
   As,
@@ -605,7 +605,7 @@ estimate_longitudinal_treatment_propensity_scores <- function(
 
 #' @importFrom SuperLearner SuperLearner predict.SuperLearner
 #' @noRd
-estimate_longitudinal_treatment_regressions <- function(
+estimate_longitudinal_dose_response_regressions <- function(
   data,
   Ls,
   As,
@@ -713,7 +713,7 @@ estimate_longitudinal_treatment_regressions <- function(
 #' @importFrom  SuperLearner SuperLearner.CV.control predict.SuperLearner SuperLearner
 #' @importFrom stats gaussian binomial
 #' @noRd
-estimate_longitudinal_treatment_nuisance <- function(
+estimate_longitudinal_dose_response_nuisance <- function(
   data,
   Ls,
   As,
@@ -729,7 +729,7 @@ estimate_longitudinal_treatment_nuisance <- function(
 ) {
   cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
 
-  pi_hat <- estimate_longitudinal_treatment_propensity_scores(
+  pi_hat <- estimate_longitudinal_dose_response_propensity_scores(
     data,
     Ls,
     As,
@@ -740,7 +740,7 @@ estimate_longitudinal_treatment_nuisance <- function(
     epsilon
   )
 
-  mu_hat <- estimate_longitudinal_treatment_regressions(
+  mu_hat <- estimate_longitudinal_dose_response_regressions(
     data,
     Ls,
     As,

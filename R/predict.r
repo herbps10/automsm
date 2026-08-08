@@ -7,7 +7,7 @@
 #' @param estimator Which estimator to use for predictions:
 #'   \code{"onestep"}, \code{"bayes"},
 #'   or \code{"tmle"} (default). Note that the \code{"bayes"} estimator
-#'   is not available for the \code{"longitudinal_treatment"} estimand.
+#'   is not available for the \code{"longitudinal_dose_response"} estimand.
 #' @param type Type of prediction; \code{"point"} for point estimates,
 #'   \code{"joint"} for draws from joint distribution.
 #' @param ... Additional arguments (not currently used).
@@ -24,9 +24,9 @@ predict.targeted_msm <- function(
   ...
 ) {
   supported <- c(
-    "treatment_effect_modification",
-    "categorical_dose_response",
-    "longitudinal_treatment"
+    "cate",
+    "dose_response",
+    "longitudinal_dose_response"
   )
 
   if(!(object$estimand %in% supported)) {
@@ -36,7 +36,7 @@ predict.targeted_msm <- function(
     )
   }
 
-  if(object$estimand == "longitudinal_treatment" && estimator == "bayes") {
+  if(object$estimand == "longitudinal_dose_response" && estimator == "bayes") {
     stop("The 'bayes' estimator is not available for the ",
          "'longitudinal_treatment' estimand.",
          call. = FALSE)

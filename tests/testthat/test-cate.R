@@ -1,13 +1,13 @@
 test_that("simulating example data for treatment effect modification works", {
-  dat <- simulate_treatment_effect_modification(N = 10, sigma = 0.1, seed = 1)
+  dat <- simulate_cate(N = 10, sigma = 0.1, seed = 1)
   expect_equal(names(dat), c("X1", "X2", "A", "Y"))
   expect_equal(nrow(dat), 10)
 })
 
 test_that("one-step estimation works on simulated dataset", {
-  dat <- simulate_treatment_effect_modification(N = 100, sigma = 0.1, seed = 1)
+  dat <- simulate_cate(N = 100, sigma = 0.1, seed = 1)
   set.seed(1)
-  fit <- treatment_effect_modification(
+  fit <- cate(
     dat,
     c("X1", "X2"),
     "A",
@@ -23,9 +23,9 @@ test_that("one-step estimation works on simulated dataset", {
 })
 
 test_that("TMLE works on simulated dataset", {
-  dat <- simulate_treatment_effect_modification(N = 100, sigma = 0.1, seed = 1)
+  dat <- simulate_cate(N = 100, sigma = 0.1, seed = 1)
   set.seed(1)
-  fit <- treatment_effect_modification(
+  fit <- cate(
     dat,
     c("X1", "X2"),
     "A",

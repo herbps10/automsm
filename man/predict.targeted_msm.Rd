@@ -14,7 +14,7 @@
 \item{estimator}{Which estimator to use for predictions:
 \code{"onestep"}, \code{"bayes"},
 or \code{"tmle"} (default). Note that the \code{"bayes"} estimator
-is not available for the \code{"longitudinal_treatment"} estimand.}
+is not available for the \code{"longitudinal_dose_response"} estimand.}
 
 \item{type}{Type of prediction; \code{"point"} for point estimates,
 \code{"joint"} for draws from joint distribution.}

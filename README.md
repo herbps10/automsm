@@ -1,17 +1,17 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# TargetedMSM <img src="man/figures/logo.png" align="right" height="140" />
+# automsm <img src="man/figures/logo.png" align="right" height="140" />
 
 <!-- badges: start -->
 
-[![R-CMD-check](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/herbps10/TargetedMSM/actions/workflows/R-CMD-check.yaml)
+[![R-CMD-check](https://github.com/herbps10/automsm/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/herbps10/automsm/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
 ## Overview
 
-The `TargetedMSM` package provides targeted estimation for a general
-class of Non-parametric Marginal Structural Models (NP-MSMs). An NP-MSM
+The `automsm` package provides targeted estimation for a general class
+of Non-parametric Marginal Structural Models (NP-MSMs). An NP-MSM
 summarizes a high-dimensional target functional (such as a conditional
 average treatment effect) by projecting it onto a lower-dimensional
 working model with respect to a loss function, without assuming the
@@ -35,18 +35,18 @@ of their differences.
 
 | Estimand | Function | One-step | TMLE | Bayesian TMLE |
 |----|----|:--:|:--:|:--:|
-| Conditional Average Treatment Effect (CATE) | `treatment_effect_modification` | ✓ | ✓ | ✓ |
-| Categorical dose-response function | `categorical_dose_response` | ✓ | ✓ | ✓ |
-| Longitudinal treatment effects | `longitudinal_treatment` | ✓ | ✓ |  |
+| Conditional Average Treatment Effect (CATE) | `cate` | ✓ | ✓ | ✓ |
+| Dose response | `dose_response` | ✓ | ✓ | ✓ |
+| Longitudinal dose response | `longitudinal_dose_response` | ✓ | ✓ |  |
 
 ## Installation
 
-You can install the development version of TargetedMSM from
-[GitHub](https://github.com/herbps10/TargetedMSM) with:
+You can install the development version of automsm from
+[GitHub](https://github.com/) with:
 
 ``` r
 # install.packages("pak")
-pak::pak("herbps10/TargetedMSM")
+pak::pak("herbps10/automsm")
 ```
 
 ## Example
@@ -56,12 +56,12 @@ squared-error loss function to summarize how a Conditional Average
 Treatment Effect (CATE) varies with a treatment effect modifier:
 
 ``` r
-library(TargetedMSM)
+library(automsm)
 
 set.seed(10016)
-data <- simulate_treatment_effect_modification(N = 500)
+data <- simulate_cate(N = 500)
 
-fit <- treatment_effect_modification(
+fit <- cate(
   data,
   c("X1", "X2"),
   "A",
@@ -77,7 +77,7 @@ fit <- treatment_effect_modification(
 
 summary(fit)
 #> 
-#> ── Targeted MSM: treatment effect modification ─────────────────────────────────
+#> ── Targeted MSM: conditional average treatment effect ──────────────────────────
 #> n = 500
 #> 
 #> ── One-step estimator ──
