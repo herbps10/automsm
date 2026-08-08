@@ -81,7 +81,7 @@ within each outer cross-fitting fold.}
 \item{nuisance}{Optional list of pre-computed nuisance parameters. If \code{NULL}
 (the default), nuisance parameters are estimated internally via cross-fitting.
 
-#' @return An object of class \code{"targeted_msm"}: a list with components
+#' @return An object of class \code{"automsm"}: a list with components
 \describe{
 \item{estimand}{Character string, \code{"cate"}.}
 \item{p}{Number of working-model coefficients.}

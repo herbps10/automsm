@@ -69,7 +69,7 @@
 #' @param nuisance Optional list of pre-computed nuisance parameters. If \code{NULL}
 #'   (the default), nuisance parameters are estimated internally via cross-fitting.
 #'
-#' @return An object of class \code{"targeted_msm"}: a list with components
+#' @return An object of class \code{"automsm"}: a list with components
 #'   \describe{
 #'     \item{estimand}{Character string, \code{"longitudinal_dose_response"}.}
 #'     \item{p}{Number of working-model coefficients.}
@@ -492,7 +492,7 @@ longitudinal_dose_response <- function(
     )
   }
 
-  class(res) <- "targeted_msm"
+  class(res) <- "automsm"
 
   res
 }

@@ -1,12 +1,12 @@
-#' Glance at a "targeted_msm" object
+#' Glance at a "automsm" object
 #'
-#' @param x An object of class \code{"targeted_msm"}
+#' @param x An object of class \code{"automsm"}
 #' @param ... Additional arguments (not currently used).
 #' @return A one-row tibble summarizing the fitted model
 #' @importFrom generics glance
 #' @importFrom tibble tibble
 #' @export
-glance.targeted_msm <- function(x, ...) {
+glance.automsm <- function(x, ...) {
   out <- tibble::tibble(
     estimand = x$estimand,
     n = x$n,

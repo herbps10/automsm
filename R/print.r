@@ -1,14 +1,14 @@
-#' Print method for objects of class "targeted_msm"
+#' Print method for objects of class "automsm"
 #'
-#' @param x An object of class \code{targeted_msm}
+#' @param x An object of class \code{automsm}
 #' @param ... Additional arguments (not currently used)
 #' @return \code{x}, invisibly
 #' @importFrom cli cli_text
 #' @export
-print.targeted_msm <- function(x, ...) {
-  label <- targeted_msm_label(x$estimand)
+print.automsm <- function(x, ...) {
+  label <- automsm_label(x$estimand)
 
-  cli::cli_text("{.strong Targeted MSM}: {label} ({.field n} = {x$n})")
+  cli::cli_text("{.strong automsm}: {label} ({.field n} = {x$n})")
 
   invisible(x)
 }
@@ -16,7 +16,7 @@ print.targeted_msm <- function(x, ...) {
 #' Human-readable label for an estimand
 #' @noRd
 
-targeted_msm_label <- function(estimand) {
+automsm_label <- function(estimand) {
   switch(
     estimand,
     cate = "conditional average treatment effect",

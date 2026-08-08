@@ -1,5 +1,5 @@
-#' Tidy method for objects of class "targeted_msm"
-#' @param x An object of class \code{"targeted_msm"}
+#' Tidy method for objects of class "automsm"
+#' @param x An object of class \code{"automsm"}
 #' @param ... Additional arguments (not currently used)
 #' @return A tibble with one row per (estimator, term) combination and columns
 #'   \code{estimator}, \code{term}, \code{estimate}, \code{conf.low},
@@ -8,8 +8,8 @@
 #' @importFrom stats median quantile sd
 #' @importFrom tibble tibble
 #' @importFrom purrr map compact list_rbind
-#' @exportS3Method tidy targeted_msm
-tidy.targeted_msm <- function(x, ...) {
+#' @exportS3Method tidy automsm
+tidy.automsm <- function(x, ...) {
   terms <- x$terms
 
   tidy_estimator <- function(est, label) {

@@ -1,8 +1,8 @@
-#' Predict from a "targeted_msm" object
+#' Predict from a "automsm" object
 #'
 #' Evaluates the fitted working model at supplied design points.
 #'
-#' @param object An object of class \code{"targeted_msm"}.
+#' @param object An object of class \code{"automsm"}.
 #' @param newdata A data frame of new data.
 #' @param estimator Which estimator to use for predictions:
 #'   \code{"onestep"}, \code{"bayes"},
@@ -16,7 +16,7 @@
 #'   each element is a vector of predictions for the corresponding row of
 #'   \code{newdata}
 #' @exportS3Method
-predict.targeted_msm <- function(
+predict.automsm <- function(
   object,
   newdata,
   estimator = "tmle",
@@ -45,7 +45,7 @@ predict.targeted_msm <- function(
   predict_working_model(object, newdata, estimator, type)
 }
 
-#' Shared prediction helper for targeted_msm objects
+#' Shared prediction helper for automsm objects
 #'
 #' @importFrom stats model.matrix var
 #' @importFrom mvtnorm rmvnorm

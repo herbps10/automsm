@@ -1,6 +1,6 @@
-#' Confidence intervals for a "targeted_msm" object
+#' Confidence intervals for a "automsm" object
 #'
-#' @param object An object of class \code{"targeted_msm"}.
+#' @param object An object of class \code{"automsm"}.
 #' @param parm A specification of which parameters to return intervals for
 #'   (defaults to all).
 #' @param level The confidence level (default 0.95).
@@ -10,7 +10,7 @@
 #' @return A matrix with columns giving the lower and upper interval bounds.
 #' @importFrom stats qnorm
 #' @export
-confint.targeted_msm <- function(object, parm, level = 0.95, estimator = c("onestep", "tmle"), ...) {
+confint.automsm <- function(object, parm, level = 0.95, estimator = c("onestep", "tmle"), ...) {
   estimator <- match.arg(estimator)
   est <- object[[estimator]]
   if(is.null(est) || is.null(est$eif)) {

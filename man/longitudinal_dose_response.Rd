@@ -86,7 +86,7 @@ within each outer cross-fitting fold.}
 (the default), nuisance parameters are estimated internally via cross-fitting.}
 }
 \value{
-An object of class \code{"targeted_msm"}: a list with components
+An object of class \code{"automsm"}: a list with components
 \describe{
 \item{estimand}{Character string, \code{"longitudinal_dose_response"}.}
 \item{p}{Number of working-model coefficients.}

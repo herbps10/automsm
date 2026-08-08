@@ -1,12 +1,12 @@
-#' Summary method for objects of class "targeted_msm"
-#' @param object An object of class \code{"targeted_msm"}
+#' Summary method for objects of class "automsm"
+#' @param object An object of class \code{"automsm"}
 #' @param ... Additional arguments (not currently used)
-#' @return An object of class \code{"summary.targeted_msm"}: a
+#' @return An object of class \code{"summary.automsm"}: a
 #'   list containing the esetimand label, sample size, working-model
 #'   term names, and a list of coefficient tables (one per available
 #'   estimator: plug-in, one-step, and optionally TMLE).
 #' @export
-summary.targeted_msm <- function(object, ...) {
+summary.automsm <- function(object, ...) {
   # Build a coefficient table for each available estimator
   estimators <- list()
   if(!is.null(object$onestep)) {
@@ -19,12 +19,12 @@ summary.targeted_msm <- function(object, ...) {
   structure(
     list(
       estimand = object$estimand,
-      label = targeted_msm_label(object$estimand),
+      label = automsm_label(object$estimand),
       n = object$n,
       terms = object$terms,
       estimators = estimators
     ),
-    class = "summary.targeted_msm"
+    class = "summary.automsm"
   )
 }
 
@@ -50,16 +50,16 @@ msm_coef_table <- function(est, terms = NULL) {
   )
 }
 
-#' Print method for objects of class "summary.targeted_msm"
+#' Print method for objects of class "summary.automsm"
 #'
-#' @param x An object of class \code{"summary.targeted_msm"}.
+#' @param x An object of class \code{"summary.automsm"}.
 #' @param digits Number of digits for the coefficient tables.
 #' @param ... Additional arguments (not currently used).
 #' @return \code{x}, invisibly.
 #' @importFrom cli cli_h1 cli_h2 cli_text cli_verbatim
 #' @export
-print.summary.targeted_msm <- function(x, digits = 3, ...) {
-  cli::cli_h1("Targeted MSM: {x$label}")
+print.summary.automsm <- function(x, digits = 3, ...) {
+  cli::cli_h1("automsm: {x$label}")
   cli::cli_text("{.field n} = {x$n}")
 
   if(length(x$estimators) == 0) {
