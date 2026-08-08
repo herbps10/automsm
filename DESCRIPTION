@@ -3,7 +3,7 @@ Title: Automatic Targeted estimators of Non-parametric Marginal Structural Model
 Version: 0.1
 Authors@R: 
     person("Herbert", "Susmann", , "herbps10@gmail.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+Description: Targeted estimation for a general class of Non-parametric Marginal Structural Models (NP-MSMs). An NP-MSM summarizes a high-dimensional target functional (such as a conditional average treatment effect) by projecting it onto a lower-dimensional working model with respect to a loss function, without assuming the working model is correctly specified. Arbitrary working models and loss functions are supported via automatic differentiation.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
