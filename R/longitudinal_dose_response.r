@@ -250,7 +250,7 @@ longitudinal_dose_response <- function(
     sum <- torch::torch_tensor(rep(0, n), requires_grad = TRUE)
     for(j in 1:K) {
       # regime j's contribution is weighted by h(regime_j)
-      sum <- sum$add(loss(t[, j], working_model(beta, X[j, , ])))$mul(h_weights_t[j])
+      sum <- sum$add(loss(working_model(beta, X[j, , ]), t[, j]))$mul(h_weights_t[j])
     }
     sum
   }

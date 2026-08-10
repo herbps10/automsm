@@ -166,7 +166,7 @@ dose_response <- function(
     K <- dim(X)[1]
     sum <- torch::torch_tensor(rep(0, n), requires_grad = TRUE)
     for (k in 1:K) {
-      sum <- sum$add(loss(t[, k], working_model(beta, X[k, , ])))
+      sum <- sum$add(loss(working_model(beta, X[k, , ]), t[, k]))
     }
     sum
   }
