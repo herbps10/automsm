@@ -4,7 +4,7 @@
 \alias{loss_cross_entropy}
 \title{Binary cross-entropy loss}
 \usage{
-loss_cross_entropy(input, target)
+loss_cross_entropy
 }
 \description{
 Elementwise binary cross-entropy loss suitable for binary outcomes.

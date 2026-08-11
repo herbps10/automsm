@@ -4,7 +4,7 @@
 \alias{loss_squared_error}
 \title{Squared-error loss}
 \usage{
-loss_squared_error(input, target)
+loss_squared_error
 }
 \description{
 Elementwise squared-error loss, \eqn{L(a, b) = (a - b)^2}, suitable

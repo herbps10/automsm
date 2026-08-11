@@ -4,7 +4,7 @@
 \alias{loss_smooth_l1}
 \title{Smooth L1 loss}
 \usage{
-loss_smooth_l1(input, target)
+loss_smooth_l1
 }
 \description{
 Elementwise smooth L1 (Huber-type) loss, a smooth approximation to the

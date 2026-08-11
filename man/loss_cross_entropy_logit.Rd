@@ -4,7 +4,7 @@
 \alias{loss_cross_entropy_logit}
 \title{Binary cross-entropy loss (logit parameterization)}
 \usage{
-loss_cross_entropy_logit(input, target)
+loss_cross_entropy_logit
 }
 \description{
 Elementwise binary cross-entropy loss where the prediction argument is on

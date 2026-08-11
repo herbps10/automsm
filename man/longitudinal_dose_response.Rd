@@ -42,12 +42,38 @@ ordered by timepoint. All entries must be columns of \code{data}.}
 
 \item{formula}{A model formula specifying the marginal structural working-model design matrix.}
 
+\item{regimes}{The set of treatment trajectories \eqn{\bar{a} \in \{0, 1\}^\tau}
+over which the NP-MSM is defined. Supplied as a \code{data.frame} (or matrix)
+with \eqn{K} rows and \eqn{\tau} columns, where each row is one trajectory
+and the columns are named to match \code{As}.}
+
+\item{summary_measures}{Optional function mapping the \code{regimes} \code{data.frame}
+to a \code{data.frame} of regime-level summary measures (one row per regime),
+used to build the marginal structural working-model design. For example,
+\code{function(regimes) data.frame(V = rowSums(regimes))} computes
+the cumulative treatment duration \eqn{v(\bar{a}) = \sum_t a_t}. When
+supplied, the design for each regime is constructed by
+evaluating \code{formula} on a data frame combining the observation-level
+covariates in \code{data} with that regime's summary measures. This
+permits formulas that mix observation-level effect modifiers and
+regime-level summaries. If \code{NULL} (the default), no summary
+measures are constructed. Note the choice of summary measures
+is part of the estimand definition, and different summaries define
+different target parameters (Petersen et al., 2014).}
+
 \item{outcome_type}{Outcome type, either \code{"continuous"} or \code{"binomial"}.}
 
 \item{loss}{The marginal structural model loss function measuring the fidelity of the
 working model to the target functional (e.g. \code{loss_weighted_sum}).}
 
 \item{working_model}{The marginal structural model working model (e.g. \code{working_model_linear}).}
+
+\item{p}{Integer giving the dimension of the working-model parameter
+\eqn{\beta} (the number of working-model coefficients). If \code{NULL}
+(the default), \code{p} is inferred from the number of columns in the
+design matrix produced by \code{formula}. When a working model whose
+coefficient dimension does not match the \code{formula}-based design, \code{p}
+should be supplied explicitly to match the working model's true number of coefficients.}
 
 \item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
 the time-varying propensity scores.}
