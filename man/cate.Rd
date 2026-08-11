@@ -11,7 +11,7 @@ cate(
   Y,
   formula,
   outcome_type = "binomial",
-  loss = loss_squared_error,
+  loss = loss_weighted_sum(loss_squared_error),
   working_model = working_model_linear,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",

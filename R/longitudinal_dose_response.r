@@ -38,22 +38,8 @@
 #' @param formula A model formula specifying the marginal structural working-model design matrix.
 #' @param outcome_type Outcome type, either \code{"continuous"} or \code{"binomial"}.
 #' @param loss The marginal structural model loss function measuring the fidelity of the
-#'   working model to the target functional (e.g. \code{loss_squared_error}).
+#'   working model to the target functional (e.g. \code{loss_weighted_sum}).
 #' @param working_model The marginal structural model working model (e.g. \code{working_model_linear}).
-#' @param h A weight function specifying the weight assigned to each treatment
-#'   trajectory in the summed-over-regimes loss. It must accept the `regimes`
-#'   data frame (with one row per trajectory in \eqn{\{0, 1\}^\tau} and one column
-#'   per treatment time point) and return a numeric vector of length `nrow(regimes)`
-#'   giving the (non-negative) weight for each regime. The default,
-#'   `function(regimes) rep(1, nrow(regimes))`, gives equal weight to all
-#'   trajectories.
-#'
-#'   Note that, unless the working model is assumed correctly specified,
-#'   the choice of weight function changes the target parameter being
-#'   estimated (see Petersen et al., 2014). Also note that, when `h` is
-#'   estimated from the data, the influence-curve based inference is valid
-#'   for the estimand defined by the estimated weights, and does not account
-#'   for uncertainty in the estimation of `h` itself.
 #' @param learners_trt A character vector of \pkg{SuperLearner} libraries for estimating
 #'   the time-varying propensity scores.
 #' @param learners_outcome A character vector of \pkg{SuperLearner} libraries for
@@ -122,10 +108,12 @@ longitudinal_dose_response <- function(
   As,
   Y,
   formula,
+  regimes,
+  summary_measures = NULL,
   outcome_type = "binomial",
-  loss = loss_squared_error,
+  loss = loss_weighted_sum(loss_squared_error),
   working_model = working_model_linear,
-  h = function(regimes) rep(1, nrow(regimes)),
+  p = NULL,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -153,6 +141,8 @@ longitudinal_dose_response <- function(
 
   checkmate::assert_formula(formula)
 
+  checkmate::assert_function(summary_measures, null.ok = TRUE)
+
   checkmate::assert_choice(outcome_type, choices = c("continuous", "binomial"))
 
   checkmate::assert_function(loss)
@@ -176,26 +166,12 @@ longitudinal_dose_response <- function(
     combine = "or"
   )
 
-
   n <- nrow(data)
   tau <- length(As)
   stopifnot(length(Ls) == length(As))
-
-  # Enumerate all binary treatment trajectories in {0,1}^\tau
-  regimes <- expand.grid(rep(list(c(0, 1)), tau))
-  colnames(regimes) <- As
-  k <- nrow(regimes) # k = 2^\tau
+  k <- nrow(regimes)
 
   # Evaluate the user-specified weight function over all regimes
-  h_weights <- h(regimes)
-  stopifnot(
-    length(h_weights) == k,
-    all(is.finite(h_weights)),
-    all(h_weights) >= 0
-  )
-
-  h_weights_t <- torch::torch_tensor(h_weights, dtype = torch::torch_float())
-
   # Map each observation to the regime index matching its observed trajectory
   regime_index <- match(
     interaction(data[, As, drop = FALSE]),
@@ -227,32 +203,39 @@ longitudinal_dose_response <- function(
   }
 
 
-  # Form the 3D MSM design matrix (K x n x p)
-  # One n x p design block per regime, substituting the regime's trajectory
-  mat0 <- model.matrix(formula, data = data)
-  terms <- colnames(mat0)
-  p <- ncol(mat0)
-
+  # Build the design tensor
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
 
-  design_matrix <- torch::torch_zeros(c(k, n, p))
-  for(j in 1:k) {
-    dataj <- data
-    dataj[, As] <- regimes[j, ]
-    matj <- stats::model.matrix(formula, data = dataj)
-    design_matrix[j, , ] <- matj
-  }
-
-  # Combined (summed over regimes) loss
-  combined_loss <- function(t, beta, X) {
-    n <- rev(dim(X))[2]
-    K <- dim(X)[1]
-    sum <- torch::torch_tensor(rep(0, n), requires_grad = TRUE)
-    for(j in 1:K) {
-      # regime j's contribution is weighted by h(regime_j)
-      sum <- sum$add(loss(working_model(beta, X[j, , ]), t[, j]))$mul(h_weights_t[j])
+  if(!is.null(summary_measures)) {
+    # ---- Convenience path: build k x n x p tensor from formula + summaries ----
+    sm <- as.data.frame(summary_measures(regimes))
+    checkmate::assert_data_frame(sm, nrows = k)
+    if(any(colnames(sm) %in% names(data))) {
+      stop("summary_measures returned column name(s) that collide with `data`: ", paste(intersect(colnames(sm), names(data)), collapse = ", "))
     }
-    sum
+
+    build_design_block <- function(j) {
+      dataj <- data
+      for(col in colnames(sm)) dataj[[col]] <- sm[j, col]
+      stats::model.matrix(formula, data = dataj)
+    }
+
+    mat1 <- build_design_block(1)
+    terms <- colnames(mat1)
+    if(is.null(p)) p <- ncol(mat1)
+
+    design_matrix <- torch::torch_zeros(c(n, k, p))
+    design_matrix[, 1, ] <- mat1
+    if(k > 1) for(j in 2:k) design_matrix[, j, ] <- build_design_block(j)
+  }
+  else {
+    mat <- stats::model.matrix(formula, data = data)
+    terms <- colnames(mat)
+    if(is.null(p)) p <- ncol(mat)
+
+    mat_tensor <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
+
+    design_matrix <- mat_tensor$expand(c(n, k, ncol(mat)))
   }
 
   ##### Plugin estimator
@@ -261,7 +244,7 @@ longitudinal_dose_response <- function(
   # psi is n x K: the ICE conditional means psi_P^{(\bar{a})}(L_1) per regime.
   psi <- torch::torch_tensor(t(nuisance$mu[, , 1]), requires_grad = TRUE)
 
-  plugin <- B(combined_loss, psi, design_matrix, Q)
+  plugin <- B(Lm(loss, working_model), psi, design_matrix, Q, p)
   beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
   # Delta: longitudinal ICE-based EIF term (n x K)
@@ -279,17 +262,17 @@ longitudinal_dose_response <- function(
   Delta <- apply(resid, c(1, 2), sum)
   Delta <- t(Delta)
 
-
   stopifnot(all(is.finite(Delta)))
 
   ##### One-step estimator
   onestep_est <- onestep(
-    combined_loss,
+    Lm(loss, working_model),
     psi,
     beta,
     design_matrix,
     Q,
-    torch::torch_tensor(Delta)
+    torch::torch_tensor(Delta),
+    p = p
   )
 
   draws <- 1e3
@@ -300,22 +283,19 @@ longitudinal_dose_response <- function(
   )
 
   if (tmle == TRUE) {
-
     # Inverse-weight clever-covariate multipliers per regime, node:
     #   HA_node[j, i, t] = I(on-protocol through t) / g_{0:t}
     HA_node <- W / pi_cumprod
     stopifnot(all(is.finite(HA_node)))
 
     # Clever covariate at a single ICE node k, for the current beta/psi
-    calculate_clever_node <- function(Lm, HA_node_k, psi, Q, beta, design_matrix) {
-      p <- rev(dim(design_matrix))[1]
-      n <- rev(dim(design_matrix))[2]
+    calculate_clever_node <- function(Lm, HA_node_k, psi, Q, beta, design_matrix, Minv) {
+      n <- dim(design_matrix)[1]
 
       cleverA <- torch::torch_tensor(array(0, dim = c(k, n, p)))
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
       for (i in 1:n) {
         d <- Minv$matmul(grad_dL(
-          Lm, psi[i, drop = FALSE], beta, design_matrix[, i, drop = FALSE]
+          Lm, psi[i, drop = FALSE], beta, design_matrix[i, , drop = FALSE]
         ))
         for (j in 1:k) {
           x <- torch::torch_zeros(k)
@@ -324,25 +304,6 @@ longitudinal_dose_response <- function(
         }
       }
       cleverA   # k x n x p
-    }
-
-    # Clever covariate for marginal distribution of covariates
-    calculate_K <- function(Lm, psi, Q, beta, design_matrix) {
-      p <- rev(dim(design_matrix))[1]
-      n <- rev(dim(design_matrix))[2]
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
-      Kmat <- torch::torch_tensor(matrix(0, n, p))
-      for (i in 1:n) {
-        Kmat[i, ] <- Minv$matmul(dL(
-          Lm, psi[i, drop = FALSE], beta, design_matrix[, i, drop = FALSE]
-        )[[1]])$reshape(p)
-      }
-      Kmat
-    }
-
-    Q_fluctuation <- function(epsilon, K, Q) {
-      Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      exp(K$matmul(epsilon) * Q) / Qn
     }
 
     if (tmle_linear == TRUE) {
@@ -387,14 +348,16 @@ longitudinal_dose_response <- function(
         mu_a_star <- mu_a_star$detach()$clone()
         mu_a_star$requires_grad_(TRUE)
 
-        clever_K <- calculate_K(combined_loss, mu_a_star, Q_star, beta_star, design_matrix)
+        Minv <- normalizing_matrix(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Q_star, p)
+        clever_K <- calculate_K(Lm(loss, working_model), mu_a_star, Q_star, beta_star, design_matrix, Minv)
 
         cleverA_t <- calculate_clever_node(
-          combined_loss, HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix
+          Lm(loss, working_model), HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
         )
 
         epsilon_t <- tmle_mle(
-          p, node_fluctuation_model,
+          p,
+          node_fluctuation_model,
           mu_star_nodes[[t]],
           mu_star_nodes[[t + 1]],
           cleverA_t, clever_K, Q_star
@@ -426,7 +389,7 @@ longitudinal_dose_response <- function(
       # After the backward sweep, node 1 holds the updated psi = ICE at L1
       mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
       mu_a_star$requires_grad_(TRUE)
-      beta_star <- B(combined_loss, mu_a_star$detach(), design_matrix, Q_star$detach())$detach()$clone()
+      beta_star <- B(Lm(loss, working_model), mu_a_star$detach(), design_matrix, Q_star$detach(), p = p)$detach()$clone()
       beta_star$requires_grad_(TRUE)
 
       if (abs(max_eps) < 1e-2) break
@@ -436,7 +399,7 @@ longitudinal_dose_response <- function(
     mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
     mu_a_star$requires_grad_(TRUE)
 
-    tmle_est <- B(combined_loss, mu_a_star$detach(), design_matrix, Q_star$detach())
+    tmle_est <- B(Lm(loss, working_model), mu_a_star$detach(), design_matrix, Q_star$detach(), p = p)
 
     # Delta reuses the telescoping ICE residual, now computed from the updated (fluctuated) nodes
     resid_star <- array(0, dim = c(k, n, tau))
@@ -447,7 +410,7 @@ longitudinal_dose_response <- function(
     Delta_star <- t(apply(resid_star, c(1, 2), sum))
 
     tmle_eif <- eif(
-      combined_loss, mu_a_star, tmle_est, design_matrix, Q_star$detach(), torch::torch_tensor(Delta_star)
+      Lm(loss, working_model), mu_a_star, tmle_est, design_matrix, Q_star$detach(), torch::torch_tensor(Delta_star), p = p
     )
 
     tmle_se <- apply(tmle_eif, 2, stats::sd) / sqrt(n)

@@ -88,7 +88,7 @@ dose_response <- function(
 
   # Check X
   checkmate::assert_character(X, min.len = 1, any.missing = TRUE, unique = TRUE)
-  checkmate::assert_choice(X, choices = names(data))
+  checkmate::assert_subset(X, choices = names(data))
 
   # Check Y
   checkmate::assert_string(Y)
@@ -148,8 +148,8 @@ dose_response <- function(
   p <- ncol(mat)
 
   design_matrix <- torch::torch_zeros(K * n * ncol(mat))$reshape(c(
-    K,
     n,
+    K,
     ncol(mat)
   ))
 
@@ -158,17 +158,7 @@ dose_response <- function(
     datak[[A]] <- As[k]
     mat <- model.matrix(formula, data = datak)
     terms <- colnames(mat)
-    design_matrix[k, , ] <- mat
-  }
-
-  combined_loss <- function(t, beta, X) {
-    n <- rev(dim(X))[2]
-    K <- dim(X)[1]
-    sum <- torch::torch_tensor(rep(0, n), requires_grad = TRUE)
-    for (k in 1:K) {
-      sum <- sum$add(loss(working_model(beta, X[k, , ]), t[, k]))
-    }
-    sum
+    design_matrix[, k, ] <- mat
   }
 
   Delta <- function(H, Y, mu) {
@@ -179,7 +169,7 @@ dose_response <- function(
   ##### Plugin estimator
   Q <- torch::torch_tensor(rep(1 / n, n))
   psi <- torch::torch_tensor(nuisance$mu_a, requires_grad = TRUE)
-  plugin <- B(combined_loss, psi, design_matrix, Q)
+  plugin <- B(Lm(loss, working_model), psi, design_matrix, Q)
   beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
   H <- torch_zeros(c(n, K))
@@ -191,7 +181,7 @@ dose_response <- function(
 
   ##### One-step estimator
   onestep_est <- onestep(
-    combined_loss,
+    Lm(loss, working_model),
     psi,
     beta,
     design_matrix,
@@ -202,61 +192,31 @@ dose_response <- function(
   # ----- TMLE -----
   if (tmle == TRUE) {
     # Calculate clever covariates for fluctuation model
-    calculate_clever <- function(Lm, H, HA, psi, Q, beta, design_matrix) {
-      p <- rev(dim(design_matrix))[1]
-      n <- rev(dim(design_matrix))[2]
+    calculate_clever <- function(Lm, H, HA, psi, Q, beta, design_matrix, Minv) {
+      n <- dim(design_matrix)[1]
+      k <- dim(design_matrix)[2]
+      p <- dim(design_matrix)[3]
 
       clever <- torch::torch_tensor(matrix(0, n, p))
-      cleverA <- torch::torch_tensor(array(0, dim = c(K, n, p)))
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
+      cleverA <- torch::torch_tensor(array(0, dim = c(n, k, p)))
       for (i in 1:n) {
         d <- Minv$matmul(grad_dL(
           Lm,
           psi[i, drop = FALSE],
           beta,
-          design_matrix[, i, drop = FALSE]
+          design_matrix[i, , drop = FALSE]
         ))
         clever[i, ] <- torch::torch_reshape(d$matmul(H[i, ]), p)
-        for (k in 1:K) {
-          x <- torch::torch_zeros(K)
-          x[k] <- HA[i, k]
-          cleverA[k, i, ] <- torch::torch_reshape(d$matmul(x), p)
+        for (j in 1:k) {
+          x <- torch::torch_zeros(k)
+          x[k] <- HA[i, j]
+          cleverA[i, k, ] <- torch::torch_reshape(d$matmul(x), p)
         }
       }
       list(
         clever = clever,
         cleverA = cleverA
       )
-    }
-
-    # Clever covariate for marginal distribution of covariates
-    calculate_K <- function(Lm, psi, Q, beta, design_matrix) {
-      p <- rev(dim(design_matrix))[1]
-      n <- rev(dim(design_matrix))[2]
-
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
-      K <- torch::torch_tensor(matrix(0, n, p))
-      for (i in 1:n) {
-        K[i, ] <- Minv$matmul(dL(
-          Lm,
-          psi[i, drop = FALSE],
-          beta,
-          design_matrix[, i, drop = FALSE]
-        )[[1]])$reshape(p)
-      }
-      K
-    }
-
-    dQ_fluctuation_depsilon <- function(epsilon, K, Q) {
-      Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(
-        K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn
-      )
-    }
-
-    Q_fluctuation <- function(epsilon, K, Q) {
-      Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      exp(K$matmul(epsilon) * Q) / Qn
     }
 
     # TMLE fluctuation model
@@ -299,7 +259,7 @@ dose_response <- function(
           )
         }
 
-        beta <- B(combined_loss, mu_a, design_matrix, Q)
+        beta <- B(Lm(loss, working_model), mu_a, design_matrix, Q)
 
         if (tmle_linear == TRUE) {
           target <- as.numeric(
@@ -313,7 +273,7 @@ dose_response <- function(
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
         jacobian <- torch::torch_zeros(c(p, p))
-        J <- dB_dpsi(combined_loss, mu_a, Q, design_matrix, beta)
+        J <- dB_dpsi(Lm(loss, working_model), mu_a, Q, design_matrix, beta)
         for (k in 1:K) {
           if (tmle_linear == TRUE) {
             jacobian <- jacobian +
@@ -327,7 +287,7 @@ dose_response <- function(
         }
         jacobian <- jacobian +
           torch::torch_transpose(
-            dB_dQ(combined_loss, psi, Q, design_matrix, beta),
+            dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta),
             1,
             2
           )$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
@@ -349,22 +309,28 @@ dose_response <- function(
       mu_a_star <- mu_a_star$detach()$clone()
       mu_a_star$requires_grad_(TRUE)
 
+      Minv <- normalizing_matrix(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Q_star)
+
       clever_K <- calculate_K(
-        combined_loss,
+        Lm(loss, working_model),
         mu_a_star,
         Q_star,
         beta_star,
-        design_matrix
+        design_matrix,
+        Minv
       )
+
       clever <- calculate_clever(
-        combined_loss,
+        Lm(loss, working_model),
         H,
         HA,
         mu_a_star,
         Q_star,
         beta_star,
-        design_matrix
+        design_matrix,
+        Minv
       )
+
       epsilon_star <- tmle_mle(
         p,
         tmle_fluctuation_model,
@@ -391,10 +357,10 @@ dose_response <- function(
       for (k in 1:K) {
         if (tmle_linear == TRUE) {
           mu_a_star[, k] <- mu_a_star[, k] +
-            clever$cleverA[k, , ]$matmul(epsilon_star)
+            clever$cleverA[, k, ]$matmul(epsilon_star)
         } else {
           mu_a_star[, k] <- torch::torch_sigmoid(
-            mu_a_star[, k]$logit() + clever$cleverA[k, , ]$matmul(epsilon_star)
+            mu_a_star[, k]$logit() + clever$cleverA[, k, ]$matmul(epsilon_star)
           )
         }
       }
@@ -402,7 +368,7 @@ dose_response <- function(
       Q_star <- Q_fluctuation(epsilon_star, clever_K, Q_star)
 
       beta_star <- B(
-        combined_loss,
+        Lm(loss, working_model),
         mu_a_star$detach(),
         design_matrix,
         Q_star$detach()
@@ -418,13 +384,13 @@ dose_response <- function(
     mu_a_star$requires_grad_(TRUE)
 
     tmle_est <- B(
-      combined_loss,
+      Lm(loss, working_model),
       mu_a_star$detach(),
       design_matrix,
       Q_star$detach()
     )
     tmle_eif <- eif(
-      combined_loss,
+      Lm(loss, working_model),
       mu_a_star,
       tmle_est,
       design_matrix,

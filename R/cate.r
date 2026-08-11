@@ -58,7 +58,7 @@ cate <- function(
   Y,
   formula,
   outcome_type = "binomial",
-  loss = loss_squared_error,
+  loss = loss_weighted_sum(loss_squared_error),
   working_model = working_model_linear,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
@@ -138,14 +138,14 @@ cate <- function(
 
   mat <- model.matrix(formula, data = data)
   terms <- colnames(mat)
-  design_matrix <- torch::torch_tensor(mat)$reshape(c(n, ncol(mat)))
-  p <- ncol(design_matrix)
+  design_matrix <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
+  p <- dim(design_matrix)[3]
 
-  Delta <- function(H, Y, mu) H * (Y - mu)
+  Delta <- function(H, Y, mu) (H * (Y - mu))$reshape(c(n, 1))
 
   ##### Plugin estimator
   Q <- torch::torch_tensor(rep(1 / n, n))
-  psi <- torch::torch_tensor(nuisance$mu1 - nuisance$mu0, requires_grad = TRUE)
+  psi <- torch::torch_tensor(nuisance$mu1 - nuisance$mu0, requires_grad = TRUE)$reshape(c(n, 1))
   plugin <- B(Lm(loss, working_model), psi, design_matrix, Q)
   beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
@@ -177,16 +177,16 @@ cate <- function(
   ##### TMLE
   if (tmle == TRUE) {
     # Calculate clever covariates for fluctuation model
-    calculate_clever <- function(Lm, H, H0, H1, psi, Q, beta, design_matrix) {
-      p <- ncol(design_matrix)
-      n <- nrow(design_matrix)
+    calculate_clever <- function(Lm, H, H0, H1, psi, Q, beta, design_matrix, Minv) {
+      n <- dim(design_matrix)[1]
+      p <- dim(design_matrix)[3]
 
       clever <- torch::torch_tensor(matrix(0, n, p))
       clever0 <- torch::torch_tensor(matrix(0, n, p))
       clever1 <- torch::torch_tensor(matrix(0, n, p))
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
+
       for (i in 1:n) {
-        d <- Minv$matmul(grad_dL(Lm, psi[i], beta, design_matrix[i, ]))
+        d <- Minv$matmul(grad_dL(Lm, psi[i, drop = FALSE], beta, design_matrix[i, , drop = FALSE]))
         clever[i, ] <- torch::torch_reshape(H[i] * d, p)
         clever0[i, ] <- torch::torch_reshape(H0[i] * d, p)
         clever1[i, ] <- torch::torch_reshape(H1[i] * d, p)
@@ -196,34 +196,6 @@ cate <- function(
         clever0 = clever0,
         clever1 = clever1
       )
-    }
-
-    # Clever covariate for marginal distribution of covariates
-    calculate_K <- function(Lm, psi, Q, beta, design_matrix) {
-      p <- rev(dim(design_matrix))[1]
-      n <- rev(dim(design_matrix))[2]
-
-      Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q)
-      K <- torch::torch_tensor(matrix(0, n, p))
-      for (i in 1:n) {
-        K[i, ] <- Minv$matmul(dL(Lm, psi[i], beta, design_matrix[i, ])[[
-          1
-        ]])$reshape(p)
-      }
-      K
-    }
-
-    dQ_fluctuation_depsilon <- function(epsilon, K, Q) {
-      Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(
-        K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn
-      )
-    }
-
-    Q_fluctuation <- function(epsilon, K, Q) {
-      Qn <- exp(K$matmul(epsilon) * Q)$sum()
-      Q <- exp(K$matmul(epsilon) * Q) / Qn
-      Q
     }
 
     # TMLE fluctuation model
@@ -250,28 +222,28 @@ cate <- function(
       bayes = FALSE
     ) {
       # Fluctuate covariate distribution
-      Q <- Q_fluctuation(epsilon, K, Q)
+      #Q <- Q_fluctuation(epsilon, K, Q)
 
       # Fluctuate outcome regression
       if (tmle_linear == TRUE) {
-        mu <- mu + clever$matmul(epsilon)
-        mu0 <- mu0 + clever0$matmul(epsilon)
-        mu1 <- mu1 + clever1$matmul(epsilon)
+        mu <- mu[, 1] + clever$matmul(epsilon)
+        mu0 <- mu0[, 1] + clever0$matmul(epsilon)
+        mu1 <- mu1[, 1] + clever1$matmul(epsilon)
         target <- tmle_loss(mu, Y)
       } else {
-        mu_logit <- mu$logit() + clever$matmul(epsilon)
-        mu0 <- torch::torch_sigmoid(mu0$logit() + clever0$matmul(epsilon))
-        mu1 <- torch::torch_sigmoid(mu1$logit() + clever1$matmul(epsilon))
-        target <- tmle_loss(mu_logit, Y)
+        mu_logit <- mu[, 1]$logit() + clever$matmul(epsilon)
+        mu0 <- torch::torch_sigmoid(mu0[,1]$logit() + clever0$matmul(epsilon))
+        mu1 <- torch::torch_sigmoid(mu1[,1]$logit() + clever1$matmul(epsilon))
+        target <- tmle_loss(mu_logit[, 1], Y)
       }
 
       # Combined loss function
-      target <- target - as.numeric(log(Q)$sum())
+      target <- target - Q$log()$sum()
 
       if (bayes == FALSE) {
         return(target)
       } else {
-        psi <- mu1 - mu0
+        psi <- (mu1 - mu0)$reshape(c(n, 1))
         beta <- B(
           Lm(loss, working_model),
           psi$detach()$clone(),
@@ -291,11 +263,7 @@ cate <- function(
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
         # Jacobian adjustment
-        jacobian <- torch::torch_transpose(
-          dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta),
-          1,
-          2
-        )
+        jacobian <- dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta)$transpose(2, 3)
         if (tmle_linear == TRUE) {
           jacobian <- jacobian$matmul(clever1 - clever0)
         } else {
@@ -306,6 +274,7 @@ cate <- function(
               clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1)))
           )
         }
+
         jacobian <- jacobian +
           torch::torch_transpose(
             dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta),
@@ -321,9 +290,9 @@ cate <- function(
     }
 
     Q_star <- Q
-    mu_star <- torch::torch_tensor(nuisance$mu)
-    mu0_star <- torch::torch_tensor(nuisance$mu0, requires_grad = TRUE)
-    mu1_star <- torch::torch_tensor(nuisance$mu1, requires_grad = TRUE)
+    mu_star <- torch::torch_tensor(nuisance$mu)$reshape(c(n, 1))
+    mu0_star <- torch::torch_tensor(nuisance$mu0)$reshape(c(n, 1))
+    mu1_star <- torch::torch_tensor(nuisance$mu1)$reshape(c(n, 1))
     beta_star <- beta
     epsilon_star <- rep(0, p)
 
@@ -333,13 +302,17 @@ cate <- function(
       psi_star <- (mu1_star - mu0_star)$detach()$clone()
       psi_star$requires_grad_(TRUE)
 
+      Minv <- normalizing_matrix(Lm(loss, working_model), psi_star, beta_star, design_matrix, Q_star)
+
       K <- calculate_K(
         Lm(loss, working_model),
         psi_star,
         Q_star,
         beta_star,
-        design_matrix
+        design_matrix,
+        Minv
       )
+
       clever <- calculate_clever(
         Lm(loss, working_model),
         H,
@@ -348,8 +321,10 @@ cate <- function(
         psi_star,
         Q_star,
         beta_star,
-        design_matrix
+        design_matrix,
+        Minv
       )
+
       epsilon_star <- tmle_mle(
         p,
         tmle_fluctuation_model,
@@ -375,19 +350,13 @@ cate <- function(
       #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
       if (tmle_linear == TRUE) {
-        mu_star <- mu_star + clever$clever$matmul(epsilon_star)
-        mu0_star <- mu0_star + clever$clever0$matmul(epsilon_star)
-        mu1_star <- mu1_star + clever$clever1$matmul(epsilon_star)
+        mu_star[, 1]  <- mu_star[, 1]  + clever$clever$matmul(epsilon_star)
+        mu0_star[, 1] <- mu0_star[, 1] + clever$clever0$matmul(epsilon_star)
+        mu1_star[, 1] <- mu1_star[, 1] + clever$clever1$matmul(epsilon_star)
       } else {
-        mu_star <- torch::torch_sigmoid(
-          mu_star$logit() + clever$clever$matmul(epsilon_star)
-        )
-        mu0_star <- torch::torch_sigmoid(
-          mu0_star$logit() + clever$clever0$matmul(epsilon_star)
-        )
-        mu1_star <- torch::torch_sigmoid(
-          mu1_star$logit() + clever$clever1$matmul(epsilon_star)
-        )
+        mu_star[, 1]  <- torch::torch_sigmoid(mu_star[, 1]$logit()  + clever$clever$matmul(epsilon_star))
+        mu0_star[, 1] <- torch::torch_sigmoid(mu0_star[, 1]$logit() + clever$clever0$matmul(epsilon_star))
+        mu1_star[, 1] <- torch::torch_sigmoid(mu1_star[, 1]$logit() + clever$clever1$matmul(epsilon_star))
       }
 
       Q_star <- Q_fluctuation(epsilon_star, K, Q_star)
@@ -415,7 +384,7 @@ cate <- function(
         tmle_est,
         design_matrix,
         Q_star,
-        Delta(H, Yt, mu_star)
+        Delta(H, Yt, mu_star[, 1])
       )
       tmle_se <- apply(tmle_eif, 2, sd) / sqrt(n)
       tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se

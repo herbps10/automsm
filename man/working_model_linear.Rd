@@ -7,9 +7,9 @@
 working_model_linear(beta, X)
 }
 \arguments{
-\item{beta}{vector of NP-MSM coefficients (must be of type torch::tensor)}
+\item{beta}{vector of NP-MSM coefficients (must be of type \code{torch::tensor})}
 
-\item{X}{design matrix (must be of type torch::tensor)}
+\item{X}{design matrix (must be of type \code{torch::tensor})}
 }
 \description{
 Linear working model.

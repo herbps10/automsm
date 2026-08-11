@@ -8,6 +8,7 @@
 #'
 #' @param N Sample size.
 #' @param sigma Conditional standard deviation of the outcome.
+#' @param nonlinear Whether to generate a nonlinear (default) or linear outcome
 #' @param seed Random number seed (optional).
 #' @return data frame of simulated data with columns \code{X1}, \code{X2},
 #'   \code{A}, and \code{Y}.
@@ -16,6 +17,7 @@
 simulate_cate <- function(
     N = 1e3,
     sigma = 0.1,
+    nonlinear = TRUE,
     seed = NULL
 ) {
   if (!is.null(seed)) {
@@ -26,7 +28,12 @@ simulate_cate <- function(
   X2 <- stats::runif(N)
   A <- stats::rbinom(N, 1, stats::plogis(X1))
 
-  cate <- sin(2 * pi * X2)
+  if(nonlinear == TRUE) {
+    cate <- sin(2 * pi * X2)
+  }
+  else {
+    cate <- 1
+  }
 
   mu0 <- 0.5 * X1
   mu1 <- 0.5 * X1 + cate
@@ -40,6 +47,7 @@ simulate_cate <- function(
 #' @param N sample size
 #' @param treatments number of discrete treatments
 #' @param sigma conditional standard deviation of outcome
+#' @param nonlinear whether to simulate a non-linear response
 #' @param seed random number seed (optional)
 #' @return data frame of simulated data
 #' @importFrom stats runif rnorm
@@ -48,6 +56,7 @@ simulate_dose_response <- function(
   N = 1e3,
   treatments = 25,
   sigma = 0.1,
+  nonlinear = TRUE,
   seed = NULL
 ) {
   if (!is.null(seed)) {
@@ -57,7 +66,12 @@ simulate_dose_response <- function(
   X1 <- stats::runif(N)
   X2 <- stats::runif(N)
   A <- sample(1:treatments, N, replace = TRUE)
-  Y <- stats::rnorm(N, 2 / A, sigma)
+  if(nonlinear == TRUE) {
+    Y <- stats::rnorm(N, 2 / A, sigma)
+  }
+  else {
+    Y <- stats::rnorm(N, A, sigma)
+  }
 
   data.frame(X1, X2, A, Y)
 }

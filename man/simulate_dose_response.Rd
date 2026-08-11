@@ -4,7 +4,13 @@
 \alias{simulate_dose_response}
 \title{Simulate example data for the conditional dose-response curve NP-MSM.}
 \usage{
-simulate_dose_response(N = 1000, treatments = 25, sigma = 0.1, seed = NULL)
+simulate_dose_response(
+  N = 1000,
+  treatments = 25,
+  sigma = 0.1,
+  nonlinear = TRUE,
+  seed = NULL
+)
 }
 \arguments{
 \item{N}{sample size}
@@ -12,6 +18,8 @@ simulate_dose_response(N = 1000, treatments = 25, sigma = 0.1, seed = NULL)
 \item{treatments}{number of discrete treatments}
 
 \item{sigma}{conditional standard deviation of outcome}
+
+\item{nonlinear}{whether to simulate a non-linear response}
 
 \item{seed}{random number seed (optional)}
 }

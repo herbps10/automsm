@@ -2,21 +2,22 @@
 % Please edit documentation in R/loss.r
 \name{loss_squared_error}
 \alias{loss_squared_error}
-\title{Squared-error loss function constructor.}
+\title{Squared-error loss}
 \usage{
 loss_squared_error(input, target)
 }
-\arguments{
-\item{input}{input vector}
-
-\item{target}{target vector}
-}
 \description{
-Squared-error loss function constructor.
+Elementwise squared-error loss, \eqn{L(a, b) = (a - b)^2}, suitable
+for continuous or bounded outcomes. This is a thin wrapper around
+\code{torch::nn_mse_loss} with \code{reduction = "none"}, so
+it returns per-element loss rather than a reduced scalar.
 }
 \details{
-This is a wrapper of the torch::nn_mse_loss function (with reduction = "none").
+The returned object is a \code{torch} loss module. It is called
+as \code{loss_squared_error(prediction, target)}, where both arguments are
+\code{torch} tensors of matching shape. \code{nn_mse_loss} is symmetric in
+its two arguments.
 }
 \seealso{
-\code{\link[torch:nn_mse_loss]{torch::nn_mse_loss()}}
+\code{\link[torch:nn_mse_loss]{torch::nn_mse_loss()}}, \code{\link[=loss_weighted_sum]{loss_weighted_sum()}}
 }

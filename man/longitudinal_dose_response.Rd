@@ -10,10 +10,12 @@ longitudinal_dose_response(
   As,
   Y,
   formula,
+  regimes,
+  summary_measures = NULL,
   outcome_type = "binomial",
-  loss = loss_squared_error,
+  loss = loss_weighted_sum(loss_squared_error),
   working_model = working_model_linear,
-  h = function(regimes) rep(1, nrow(regimes)),
+  p = NULL,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -43,24 +45,9 @@ ordered by timepoint. All entries must be columns of \code{data}.}
 \item{outcome_type}{Outcome type, either \code{"continuous"} or \code{"binomial"}.}
 
 \item{loss}{The marginal structural model loss function measuring the fidelity of the
-working model to the target functional (e.g. \code{loss_squared_error}).}
+working model to the target functional (e.g. \code{loss_weighted_sum}).}
 
 \item{working_model}{The marginal structural model working model (e.g. \code{working_model_linear}).}
-
-\item{h}{A weight function specifying the weight assigned to each treatment
-trajectory in the summed-over-regimes loss. It must accept the \code{regimes}
-data frame (with one row per trajectory in \eqn{\{0, 1\}^\tau} and one column
-per treatment time point) and return a numeric vector of length \code{nrow(regimes)}
-giving the (non-negative) weight for each regime. The default,
-\code{function(regimes) rep(1, nrow(regimes))}, gives equal weight to all
-trajectories.
-
-Note that, unless the working model is assumed correctly specified,
-the choice of weight function changes the target parameter being
-estimated (see Petersen et al., 2014). Also note that, when \code{h} is
-estimated from the data, the influence-curve based inference is valid
-for the estimand defined by the estimated weights, and does not account
-for uncertainty in the estimation of \code{h} itself.}
 
 \item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
 the time-varying propensity scores.}

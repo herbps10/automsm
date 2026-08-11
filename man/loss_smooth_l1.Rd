@@ -2,21 +2,22 @@
 % Please edit documentation in R/loss.r
 \name{loss_smooth_l1}
 \alias{loss_smooth_l1}
-\title{Smooth L1 loss function constructor.}
+\title{Smooth L1 loss}
 \usage{
 loss_smooth_l1(input, target)
 }
-\arguments{
-\item{input}{input vector}
-
-\item{target}{target vector}
-}
 \description{
-Smooth L1 loss function constructor.
+Elementwise smooth L1 (Huber-type) loss, a smooth approximation to the
+absolute-error loss that behaves quadratically for small residuals and
+linearly for large ones. This is a thin wrapper aoround
+\code{torch::nn_smooth_l1_loss} with \code{reduction = "none"}, so it
+returns per-element losses rather than a reduced scalar.
 }
 \details{
-This is a wrapper of the torch::nn_smooth_l1_loss function (with reduction = "none").
+The returned object is a \code{torch} loss module. It is called as
+\code{loss_smooth_l1(prediction, target)}, where both arguments are
+\code{torch} tensors of matching shape.
 }
 \seealso{
-\code{\link[torch:nn_smooth_l1_loss]{torch::nn_smooth_l1_loss()}}
+\code{\link[torch:nn_smooth_l1_loss]{torch::nn_smooth_l1_loss()}}, \code{\link[=loss_weighted_sum]{loss_weighted_sum()}}
 }
