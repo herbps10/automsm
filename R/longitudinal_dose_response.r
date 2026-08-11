@@ -636,7 +636,7 @@ estimate_longitudinal_dose_response_regressions <- function(
     # We only need pseudo-outcomes for *unique* future treatment trajectories
     outcomes <- regress_and_predict(
       t + 1,
-      unique(regimes[, (t + 1):tau, drop = FALSE]),
+      unique(regimes[, As[(t + 1):tau], drop = FALSE]),
       train,
       valid
     )
