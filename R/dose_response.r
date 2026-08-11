@@ -252,11 +252,9 @@ dose_response <- function(
         target
       } else {
         if (tmle_linear == TRUE) {
-          mu_a <- mu_a + clever$cleverA$matmul(epsilon)$transpose(1, 2)
+          mu_a <- mu_a + clever$cleverA$matmul(epsilon)
         } else {
-          mu_a <- torch::torch_sigmoid(
-            mu_a$logit() + clever$cleverA$matmul(epsilon)$transpose(1, 2)
-          )
+          mu_a <- torch::torch_sigmoid(mu_a$logit() + clever$cleverA$matmul(epsilon))
         }
 
         beta <- B(Lm(loss, working_model), mu_a, design_matrix, Q)
@@ -277,14 +275,15 @@ dose_response <- function(
         for (k in 1:K) {
           if (tmle_linear == TRUE) {
             jacobian <- jacobian +
-              J[k, , ]$transpose(1, 2)$matmul(clever$cleverA[k, ])
+              J[k, , ]$transpose(1, 2)$matmul(clever$cleverA[, k, ])
           } else {
             jacobian <- jacobian +
               J[k, , ]$transpose(1, 2)$matmul(
-                (clever$cleverA[k, ] * mu_a[, k]) * (1 - mu_a[, k])
+                (clever$cleverA[, k, ] * mu_a[, k]) * (1 - mu_a[, k, ])
               )
           }
         }
+
         jacobian <- jacobian +
           torch::torch_transpose(
             dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta),
@@ -389,6 +388,7 @@ dose_response <- function(
       design_matrix,
       Q_star$detach()
     )
+
     tmle_eif <- eif(
       Lm(loss, working_model),
       mu_a_star,

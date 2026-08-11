@@ -10,6 +10,8 @@
 #' \code{torch} tensors of matching shape. \code{nn_mse_loss} is symmetric in
 #' its two arguments.
 #'
+#' @usage loss_squared_error
+#'
 #' @importFrom torch nn_mse_loss
 #' @seealso [torch::nn_mse_loss()], [loss_weighted_sum()]
 #' @export
@@ -27,6 +29,8 @@ loss_squared_error <- torch::nn_mse_loss(reduction = "none")
 #' \code{prediction} is a tensor in \eqn{[0, 1]} and \code{target} is a tensor of
 #' outcomes of matching shape. The argument order is meaningful:
 #' the first argument must be the predictions.
+#'
+#' @usage loss_cross_entropy
 #'
 #' @seealso [torch::nn_bce_loss()], [loss_weighted_sum()]
 #' @importFrom torch nn_bce_loss
@@ -46,6 +50,8 @@ loss_cross_entropy <- torch::nn_bce_loss(reduction = "none")
 #' outcomes of matching shape. The argument order is meaningful:
 #' the first argument must be the logits.
 #'
+#' @usage loss_cross_entropy_logit
+#'
 #' @seealso [torch::nn_bce_with_logits_loss()], [loss_weighted_sum()]
 #' @importFrom torch nn_bce_with_logits_loss
 #' @export
@@ -62,6 +68,8 @@ loss_cross_entropy_logit <- torch::nn_bce_with_logits_loss(reduction = "none")
 #' @details The returned object is a \code{torch} loss module. It is called as
 #' \code{loss_smooth_l1(prediction, target)}, where both arguments are
 #' \code{torch} tensors of matching shape.
+#'
+#' @usage loss_smooth_l1
 #'
 #' @seealso [torch::nn_smooth_l1_loss()], [loss_weighted_sum()]
 #' @importFrom torch nn_smooth_l1_loss
