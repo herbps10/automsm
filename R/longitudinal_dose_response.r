@@ -194,13 +194,6 @@ longitudinal_dose_response <- function(
   stopifnot(length(Ls) == length(As))
   k <- nrow(regimes)
 
-  # Evaluate the user-specified weight function over all regimes
-  # Map each observation to the regime index matching its observed trajectory
-  regime_index <- match(
-    interaction(data[, As, drop = FALSE]),
-    interaction(regimes)
-  )
-
   # Set up cross-train so the same training and valid folds
   # are used in propensity scores and ICE regressions
   cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
@@ -310,23 +303,19 @@ longitudinal_dose_response <- function(
     #   HA_node[j, i, t] = I(on-protocol through t) / g_{0:t}
     HA_node <- W / pi_cumprod
     stopifnot(all(is.finite(HA_node)))
+    HA_node <- torch::torch_tensor(HA_node)
 
     # Clever covariate at a single ICE node k, for the current beta/psi
     calculate_clever_node <- function(Lm, HA_node_k, psi, Q, beta, design_matrix, Minv) {
       n <- dim(design_matrix)[1]
+      k <- dim(design_matrix)[2]
 
-      cleverA <- torch::torch_tensor(array(0, dim = c(k, n, p)))
-      for (i in 1:n) {
-        d <- Minv$matmul(grad_dL(
-          Lm, psi[i, drop = FALSE], beta, design_matrix[i, , drop = FALSE]
-        ))
-        for (j in 1:k) {
-          x <- torch::torch_zeros(k)
-          x[j] <- HA_node_k[j, i] # regime j's inverse-weight at this node
-          cleverA[j, i, ] <- torch::torch_reshape(d$matmul(x), p)
-        }
-      }
-      cleverA   # k x n x p
+      NablaLdot <- torch::torch_stack(batched_NablaLdot(Lm, psi, beta, design_matrix, p, k), dim = 1)
+      d_all <- torch::torch_matmul(Minv, NablaLdot$permute(c(2, 1, 3)))
+      d_all_t <- d_all$transpose(2, 3)
+      HA_perm <- HA_node_k$t()$reshape(c(n, k, 1))
+      cleverA <- (d_all_t * HA_perm)$permute(c(2, 1, 3))
+      cleverA
     }
 
     if (tmle_linear == TRUE) {
@@ -372,7 +361,7 @@ longitudinal_dose_response <- function(
         mu_a_star$requires_grad_(TRUE)
 
         Minv <- normalizing_matrix(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Q_star, p)
-        clever_K <- calculate_K(Lm(loss, working_model), mu_a_star, Q_star, beta_star, design_matrix, Minv)
+        clever_K <- calculate_K(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Minv)
 
         cleverA_t <- calculate_clever_node(
           Lm(loss, working_model), HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
@@ -387,7 +376,7 @@ longitudinal_dose_response <- function(
         )
 
         max_eps <- max(max_eps, max(abs(as.numeric(epsilon_t))))
-        cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {max_eps}\n\n"))
+        #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {max_eps}\n\n"))
 
         # Update the node-t fit for each regime
         upd <- mu_star_nodes[[t]]$detach()$clone()
@@ -551,45 +540,51 @@ estimate_longitudinal_dose_response_propensity_scores <- function(
   Ls,
   As,
   cv,
-  folds,
   learners_trt,
   cv_control,
   epsilon
 ) {
   n <- nrow(data)
   tau <- length(As)
-
   pi_hat <- matrix(nrow = n, ncol = tau)
-
-  # Propensity score fits
   for (fold in seq_along(cv)) {
     train <- cv[[fold]]$training_set
     valid <- cv[[fold]]$validation_set
-
-    for (t in 1:tau) {
+    for (t in seq_len(tau)) {
       Ht <- history_cols(t, Ls, As)
-      pi_model <- SuperLearner::SuperLearner(
+
+      res <- sl_fit_predict(
         Y = data[[As[t]]][train],
         X = data[train, Ht, drop = FALSE],
+        newdata = list(valid = data[valid, Ht, drop = FALSE]),
         SL.library = learners_trt,
         family = "binomial",
-        cvControl = cv_control,
-        env = environment(SuperLearner::SuperLearner)
+        cv_control = cv_control,
+        bounds = c(0, 1),
+        epsilon = epsilon
       )
 
-      pi_hat[valid, t] <- SuperLearner::predict.SuperLearner(
-        pi_model,
-        newdata = data[valid, c(Ht), drop = FALSE],
-        onlySL = TRUE
-      )$pred
-      pi_hat[valid, t] <- bound(pi_hat[valid, t], 0, 1, epsilon)
+      pi_hat[valid, t] <- res$pred$valid
     }
   }
 
-  return(pi_hat)
+  stopifnot(!anyNA(pi_hat))
+  pi_hat
 }
 
-#' @importFrom SuperLearner SuperLearner predict.SuperLearner
+#' Estimate the sequential (ICE) outcome regressions for a longitudinal NP-MSM
+#'
+#' @details
+#' The pseudo-outcomes at node \code{t} depends on the treatment trajectory only
+#' through its suffix \eqn{(a_t, \dots, a_\tau)}. The recursion works over the
+#' distinct suffixes actually present in \code{regimes}, matching each
+#' to its parent suffix by key, so only the requested regimes are produced
+#' (and slice \code{j} of the returned array corresponds to row \code{j} of
+#' \code{regimes}). Each regression is fit pooling over all observed treatment
+#' values and then evaluated at the regime's value of \eqn{A_t}, so rules
+#' with little support still borrow strength from the full sample.
+#'
+#' @importFrom stats gaussian
 #' @noRd
 estimate_longitudinal_dose_response_regressions <- function(
   data,
@@ -599,8 +594,8 @@ estimate_longitudinal_dose_response_regressions <- function(
   regimes,
   learners_outcome,
   cv,
-  folds,
   outcome_type,
+  outcome_family,
   cv_control,
   epsilon
 ) {
@@ -608,92 +603,92 @@ estimate_longitudinal_dose_response_regressions <- function(
   tau <- length(As)
   k <- nrow(regimes)
 
-  # Recursion
-  regress_and_predict <- function(t, regimes, train, valid) {
+  bounds <- if(outcome_type == "binomial") c(0, 1) else NULL
+
+  # Distinct suffixes requested at each level
+  suffixes <- vector("list", tau + 1L)
+  for(t in seq_len(tau)) {
+    suffixes[[t]] <- unique(regimes[, As[t:tau], drop = FALSE])
+  }
+  suffixes[[tau + 1L]] <- regimes[1L, integer(0), drop = FALSE]
+
+  # Recursion over suffixes
+  regress_and_predict <- function(t, train, valid) {
     # Base case: if t == tau, then pseudo-outcome is Y
-    if (t == tau + 1) {
-      return(list(list(
-        regime = c(),
+    if (t == tau + 1L) {
+      return(list(
+        keys = regime_key(suffixes[[tau + 1L]]),
+        fits = list(list(
         train = matrix(data[[Y]][train], ncol = 1),
         valid = matrix(data[[Y]][valid], ncol = 1)
-      )))
+        ))
+      ))
     }
 
-    # We only need pseudo-outcomes for *unique* future treatment trajectories
-    outcomes <- regress_and_predict(
-      t + 1,
-      unique(regimes[, As[(t + 1):tau], drop = FALSE]),
-      train,
-      valid
-    )
+    parent <- regress_and_predict(t + 1L, train, valid)
+
+    needed <- suffixes[[t]]
+    keys_t <- regime_key(needed)
+    parent_idx <- match(regime_key(needed[, -1L, drop = FALSE]), parent$keys)
+    stopifnot(!anyNA(parent_idx))
+
+    a_t_vals <- needed[[As[t]]]
     Ht_At <- c(history_cols(t, Ls, As), As[t])
+    Xtrain <- data[train, Ht_At, drop = FALSE]
+    fam <- if(t == tau) outcome_family else stats::gaussian()
 
-    current_outcomes <- list()
+    out <- vector("list", nrow(needed))
 
-    # Now fit new models to each of the unique pseudo-outcome sets
-    for (po_index in seq_along(outcomes)) {
-      outcome <- outcomes[[po_index]]
+    # One fit per distinct parent pseudo-outcome; reuse it across the a_t
+    # values required by the regimes sharing that parent.
+    for (pj in unique(parent_idx)) {
+      po <- parent$fits[[pj]]
 
-      outcome_family <- stats::gaussian()
-      if (outcome_type == "binomial") {
-        outcome_family <- stats::binomial
-      }
-
-      mu_model <- SuperLearner::SuperLearner(
-        Y = outcome$train[, 1],
-        X = data[train, Ht_At, drop = FALSE],
+      mu_fit <- sl_fit(
+        Y = po$train[, 1L],
+        X = Xtrain,
         SL.library = learners_outcome,
-        family = if (t == tau) outcome_family else gaussian(),
-        cvControl = cv_control,
-        env = environment(SuperLearner::SuperLearner)
+        family = fam,
+        cv_control = cv_control
       )
 
-      for (a_t in unique(regimes[, 1, drop = FALSE][[As[t]]])) {
-        newdata_train <- data[train, Ht_At, drop = FALSE]
-        newdata_valid <- data[valid, Ht_At, drop = FALSE]
-        newdata_train[[As[t]]] <- a_t
-        newdata_valid[[As[t]]] <- a_t
+      for (j in which(parent_idx == pj)) {
+        nd_train <- data[train, Ht_At, drop = FALSE]
+        nd_valid <- data[valid, Ht_At, drop = FALSE]
+        nd_train[[As[t]]] <- a_t_vals[j]
+        nd_valid[[As[t]]] <- a_t_vals[j]
 
-        current_outcomes[[length(current_outcomes) + 1]] <- list(
-          regime = c(a_t, outcome$regime),
-          train = cbind(
-            SuperLearner::predict.SuperLearner(
-              mu_model,
-              newdata = newdata_train,
-              onlySL = TRUE
-            )$pred,
-            outcome$train
-          ),
-          valid = cbind(
-            SuperLearner::predict.SuperLearner(
-              mu_model,
-              newdata = newdata_valid,
-              onlySL = TRUE
-            )$pred,
-            outcome$valid
-          )
+        out[[j]] <- list(
+          train = cbind(sl_predict(mu_fit, nd_train, bounds, epsilon), po$train),
+          valid = cbind(sl_predict(mu_fit, nd_valid, bounds, epsilon), po$valid)
         )
       }
     }
 
-    return(current_outcomes)
+    list(keys = keys_t, fits = out)
   }
 
-  results <- list()
-  mu_valid <- array(dim = c(k, n, tau + 1))
-  for (fold in seq_len(folds)) {
+  regime_keys <- regime_key(regimes)
+  mu_valid <- array(NA_real_, dim = c(k, n, tau + 1L))
+
+  for (fold in seq_along(cv)) {
     train <- cv[[fold]]$training_set
     valid <- cv[[fold]]$validation_set
-    results <- regress_and_predict(1, regimes, train, valid)
 
-    for (j in seq_along(results)) {
-      mu_valid[j, valid, ] <- results[[j]]$valid
+    res <- regress_and_predict(1L, train, valid)
+
+    idx <- match(regime_keys, res$keys)
+    stopifnot(!anyNA(idx))
+
+    for (j in seq_len(k)) {
+      mu_valid[j, valid, ] <- res$fits[[idx[j]]]$valid
     }
   }
 
+  stopifnot(!anyNA(mu_valid))
+
   mu_valid
 }
-
 
 #' @importFrom  origami  make_folds
 #' @importFrom  SuperLearner SuperLearner.CV.control predict.SuperLearner SuperLearner
@@ -713,16 +708,15 @@ estimate_longitudinal_dose_response_nuisance <- function(
   outcome_type,
   epsilon = 1e-5
 ) {
-  cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
+  setup <- nuisance_setup(nrow(data), outer_folds, inner_folds, outcome_type, cv)
 
   pi_hat <- estimate_longitudinal_dose_response_propensity_scores(
     data,
     Ls,
     As,
-    cv,
-    outer_folds,
+    setup$cv,
     learners_trt,
-    cv_control,
+    setup$cv_control,
     epsilon
   )
 
@@ -733,10 +727,10 @@ estimate_longitudinal_dose_response_nuisance <- function(
     Y,
     regimes,
     learners_outcome,
-    cv,
-    outer_folds,
+    setup$cv,
     outcome_type,
-    cv_control,
+    setup$outcome_family,
+    setup$cv_control,
     epsilon
   )
 
@@ -744,4 +738,14 @@ estimate_longitudinal_dose_response_nuisance <- function(
     pi = pi_hat,
     mu = mu_hat
   )
+}
+
+#' Stable key for a set of treatment trajectories (or suffixes thereof)
+#'
+#' Handles the zero-column case (the empty suffix at node \eqn{tau + 1})
+#' @noRd
+regime_key <- function(x) {
+  x <- as.matrix(x)
+  if(ncol(x) == 0L) return(rep("", nrow(x)))
+  apply(x, 1L, paste, collapse = "\r")
 }

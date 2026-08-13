@@ -176,14 +176,11 @@ normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p = NULL) {
   torch::torch_tensor(Minv)
 }
 
+#' Per-observation gradient of the loss wrt beta (the \dot{L}_m / D_2 term)
+#' Returns an n x p tensor whose i-th row is dL_m/dbeta for observation i
 #' @noRd
-eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
+batched_dL_dbeta <- function(Lm, psi, beta, design_matrix, p) {
   n <- dim(design_matrix)[1]
-  k <- dim(design_matrix)[2]
-  if(is.null(p)) p <- dim(design_matrix)[3]
-
-  Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q, p)
-
   Lm_vec <- Lm(psi, beta, design_matrix)
   D2 <- torch::torch_cat(
     purrr::map(1:n, function(i) {
@@ -200,10 +197,15 @@ eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
     }),
     dim = 1
   )
+}
 
-  # D1 = NablaLdot * Delta
+#' Per-observation NablaLdot blocks (the grad-of-loss-gradient-wrt-psi term)
+#' Returns a list of p tensors, each n x k, with NULL gradients zero-filled
+#' @noRd
+batched_NablaLdot <- function(Lm, psi, beta, design_matrix, p, k) {
+  n <- dim(design_matrix)[1]
   obj <- dL(Lm, psi, beta, design_matrix)[[1]]
-  grad_blocks <- purrr::map(1:p, function(j) {
+  purrr::map(1:p, function(j) {
     g <- torch::autograd_grad(
       obj[j],
       psi,
@@ -219,6 +221,20 @@ eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
     }
     g
   })
+}
+
+#' @noRd
+eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
+  n <- dim(design_matrix)[1]
+  k <- dim(design_matrix)[2]
+  if(is.null(p)) p <- dim(design_matrix)[3]
+
+  Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q, p)
+
+  D2 <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p)
+
+  # D1 = NablaLdot * Delta
+  grad_blocks <- batched_NablaLdot(Lm, psi, beta, design_matrix, p, k)
 
   D1 <- -torch::torch_cat(
     purrr::map(grad_blocks, function(gb) {

@@ -79,46 +79,15 @@ dose_response <- function(
   epsilon = 1e-5,
   nuisance = NULL
 ) {
-  # ----- Argument checks -----
-  checkmate::assert_data_frame(data, min.rows = 1, min.cols = 1)
-
-  # Check A
-  checkmate::assert_string(A)
-  checkmate::assert_subset(A, choices = names(data))
-
-  # Check X
-  checkmate::assert_character(X, min.len = 1, any.missing = TRUE, unique = TRUE)
-  checkmate::assert_subset(X, choices = names(data))
-
-  # Check Y
-  checkmate::assert_string(Y)
-  checkmate::assert_choice(Y, choices = names(data))
-
-  checkmate::assert_formula(formula)
-
-  checkmate::assert_choice(outcome_type, choices = c("continuous", "binomial"))
-
-  checkmate::assert_function(loss)
-  checkmate::assert_function(working_model)
-
-  checkmate::assert_character(learners_trt, min.len = 1, any.missing = FALSE)
-  checkmate::assert_character(learners_outcome, min.len = 1, any.missing = FALSE)
-
-  checkmate::assert_count(outer_folds, positive = TRUE)
-  checkmate::assert_count(inner_folds, positive = TRUE)
-
-  checkmate::assert_flag(tmle)
-  checkmate::assert_count(tmle_maxiter, positive = TRUE)
-  checkmate::assert_flag(tmle_linear)
-
-  checkmate::assert_number(epsilon, lower = 0, upper = 0.5, finite = TRUE)
-
-  checkmate::assert(
-    checkmate::check_null(nuisance),
-    checkmate::check_list(nuisance),
-    combine = "or"
+  validate_msm_arguments(
+    data, X, A, Y, formula,
+    outcome_type, loss, working_model,
+    learners_trt, learners_outcome,
+    outer_folds, inner_folds,
+    tmle, tmle_maxiter, tmle_linear,
+    bayes, bayes_draws, bayes_chains, bayes_prior,
+    epsilon, nuisance
   )
-
 
   n <- nrow(data)
   if (is.null(nuisance)) {
@@ -137,15 +106,14 @@ dose_response <- function(
     )
   }
 
-  Xt <- torch::torch_tensor(as.matrix(data[, X, drop = FALSE]))
-  Yt <- torch::torch_tensor(data[[Y]])
-
-  As <- sort(unique(data[[A]]))
-  K <- length(As)
-
   mat <- stats::model.matrix(formula, data = data)
   terms <- colnames(mat)
   p <- ncol(mat)
+
+  Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
+
+  As <- sort(unique(data[[A]]))
+  K <- length(As)
 
   design_matrix <- torch::torch_zeros(K * n * ncol(mat))$reshape(c(
     n,
@@ -161,16 +129,8 @@ dose_response <- function(
     design_matrix[, k, ] <- mat
   }
 
-  Delta <- function(H, Y, mu) {
-    n <- nrow(H)
-    H$mul((Y - mu)$reshape(c(n, 1)))
-  }
-
-  ##### Plugin estimator
   Q <- torch::torch_tensor(rep(1 / n, n))
   psi <- torch::torch_tensor(nuisance$mu_a, requires_grad = TRUE)
-  plugin <- B(Lm(loss, working_model), psi, design_matrix, Q)
-  beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
   H <- torch_zeros(c(n, K))
   HA <- torch_zeros(c(n, K))
@@ -179,15 +139,11 @@ dose_response <- function(
     HA[, k] <- 1 / nuisance$pi_a[, k]
   }
 
-  ##### One-step estimator
-  onestep_est <- onestep(
-    Lm(loss, working_model),
-    psi,
-    beta,
-    design_matrix,
-    Q,
-    Delta(H, Yt, torch::torch_tensor(nuisance$mu))
-  )
+  Delta <- H$mul((Yt - torch::torch_tensor(nuisance$mu))$reshape(c(n, 1)))
+  base <- estimate_plugin_and_onestep(loss, working_model, design_matrix, psi, Q, Delta)
+
+  tmle_res <- NULL
+  bayes_tmle_res <- NULL
 
   # ----- TMLE -----
   if (tmle == TRUE) {
@@ -209,8 +165,8 @@ dose_response <- function(
         clever[i, ] <- torch::torch_reshape(d$matmul(H[i, ]), p)
         for (j in 1:k) {
           x <- torch::torch_zeros(k)
-          x[k] <- HA[i, j]
-          cleverA[i, k, ] <- torch::torch_reshape(d$matmul(x), p)
+          x[j] <- HA[i, j]
+          cleverA[i, j, ] <- torch::torch_reshape(d$matmul(x), p)
         }
       }
       list(
@@ -271,6 +227,7 @@ dose_response <- function(
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
         jacobian <- torch::torch_zeros(c(p, p))
+
         J <- dB_dpsi(Lm(loss, working_model), mu_a, Q, design_matrix, beta)
         for (k in 1:K) {
           if (tmle_linear == TRUE) {
@@ -279,14 +236,14 @@ dose_response <- function(
           } else {
             jacobian <- jacobian +
               J[k, , ]$transpose(1, 2)$matmul(
-                (clever$cleverA[, k, ] * mu_a[, k]) * (1 - mu_a[, k, ])
+                (clever$cleverA[, k, ] * mu_a[, k]) * (1 - mu_a[, k])
               )
           }
         }
 
         jacobian <- jacobian +
           torch::torch_transpose(
-            dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta),
+            dB_dQ(Lm(loss, working_model), mu_a, Q, design_matrix, beta),
             1,
             2
           )$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
@@ -301,7 +258,7 @@ dose_response <- function(
     Q_star <- Q
     mu_star <- torch::torch_tensor(nuisance$mu)
     mu_a_star <- torch::torch_tensor(nuisance$mu_a)
-    beta_star <- beta
+    beta_star <- torch::torch_tensor(base$plugin$est, requires_grad = TRUE)
     epsilon_star <- rep(0, p)
 
     for (tmle_iter in 1:tmle_maxiter) {
@@ -313,7 +270,6 @@ dose_response <- function(
       clever_K <- calculate_K(
         Lm(loss, working_model),
         mu_a_star,
-        Q_star,
         beta_star,
         design_matrix,
         Minv
@@ -341,7 +297,7 @@ dose_response <- function(
         Yt
       )
 
-      m <- max(as.numeric(epsilon_star))
+      m <- max(abs(as.numeric(epsilon_star)))
       #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
       if (tmle_linear == TRUE) {
@@ -395,11 +351,19 @@ dose_response <- function(
       tmle_est,
       design_matrix,
       Q_star$detach(),
-      Delta(H, Yt, mu_star$detach())
+      H$mul((Yt - mu_star$detach())$reshape(c(n, 1)))
     )
     tmle_se <- apply(tmle_eif, 2, stats::sd) / sqrt(n)
     tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
     tmle_upper <- tmle_est + stats::qnorm(0.975) * tmle_se
+
+    tmle_res <- list(
+      est = as.numeric(tmle_est),
+      se = as.numeric(tmle_se),
+      lower = as.numeric(tmle_lower),
+      upper = as.numeric(tmle_upper),
+      eif = as.numeric(tmle_eif)
+    )
 
     tmle_beta_samples <- NULL
     tmle_acc_rate <- NULL
@@ -441,48 +405,17 @@ dose_response <- function(
         )
         tmle_acc_rate <- tmle_acc_rate + 1 / bayes_chains * mcmc$acceptance.rate
       }
+
+      bayes_tmle_res <- list(
+        samples = tmle_beta_samples,
+        acc_rate = tmle_acc_rate
+      )
     }
   }
 
-  res <- list(
-    estimand = "dose_response",
-    p = p,
-    n = n,
-    formula = formula,
-    working_model = working_model,
-    loss = loss,
-    terms = terms,
-    learners_trt = learners_trt,
-    learners_outcome = learners_outcome,
-    nuisance = nuisance,
-    plugin = list(
-      est = as.numeric(plugin)
-    ),
-    onestep = list(
-      est = as.numeric(onestep_est$est),
-      se = as.numeric(onestep_est$se),
-      lower = as.numeric(onestep_est$lower),
-      upper = as.numeric(onestep_est$upper),
-      eif = onestep_est$eif,
-      psi = as.numeric(psi)
-    )
+  assemble_result(
+    "dose_response", p, n, formula, working_model, loss, terms, learners_trt, learners_outcome, nuisance, plugin = list(est = as.numeric(base$plugin$est)), onestep = base$onestep, tmle_res, bayes_tmle_res
   )
-
-  if (tmle == TRUE) {
-    res$tmle <- list(
-      est = as.numeric(tmle_est),
-      se = as.numeric(tmle_se),
-      lower = as.numeric(tmle_lower),
-      upper = as.numeric(tmle_upper),
-      eif = tmle_eif,
-      samples = tmle_beta_samples,
-      acc_rate = tmle_acc_rate
-    )
-  }
-
-  class(res) <- "automsm"
-
-  res
 }
 
 #' @importFrom  origami  make_folds
@@ -500,122 +433,28 @@ estimate_dose_response_nuisance <- function(
   inner_folds,
   outcome_type,
   estimate_conditional_variance = FALSE,
-  epsilon = 1e-5
+  epsilon = 1e-5,
+  cv = NULL
 ) {
-  n <- nrow(data)
-  As <- sort(unique(data[[A]]))
-  k <- length(As)
-
-  pi_a_hat <- mu_a_hat <- matrix(0, n, k)
-  pi_hat <- mu_hat <- condvar_hat <- numeric(n)
-
-  cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
-  if (outer_folds == 1) {
-    cv[[1]]$training_set <- cv[[1]]$validation_set
-  }
-  cv_control <- SuperLearner::SuperLearner.CV.control(V = inner_folds)
-
-  outcome_family <- stats::gaussian()
-  if (outcome_type == "binomial") {
-    outcome_family <- stats::binomial()
-  }
-
-  for (fold in seq_along(cv)) {
-    training <- cv[[fold]]$training_set
-    validation <- cv[[fold]]$validation_set
-
-    for (a_index in seq_along(As)) {
-      pi_model <- SuperLearner::SuperLearner(
-        Y = as.numeric(data[[A]][training] == As[a_index]),
-        X = data[training, X, drop = FALSE],
-        SL.library = learners_trt,
-        family = "binomial",
-        cvControl = cv_control,
-        env = environment(SuperLearner::SuperLearner)
-      )
-
-      pi_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(
-        pi_model,
-        newdata = data[validation, c(X), drop = FALSE],
-        onlySL = TRUE
-      )$pred
-      pi_a_hat[validation, a_index] <- bound(
-        pi_a_hat[validation, a_index],
-        0,
-        1,
-        epsilon
-      )
-    }
-
-    mu_model <- SuperLearner::SuperLearner(
-      Y = data[[Y]][training],
-      X = data[training, c(X, A), drop = FALSE],
-      SL.library = learners_outcome,
-      family = outcome_family,
-      cvControl = cv_control,
-      env = environment(SuperLearner::SuperLearner)
-    )
-
-    for (a_index in seq_along(As)) {
-      newdata <- data[validation, c(X, A)]
-      newdata[[A]] <- As[a_index]
-      mu_a_hat[validation, a_index] <- SuperLearner::predict.SuperLearner(
-        mu_model,
-        newdata = newdata,
-        onlySL = TRUE
-      )$pred
-      if (outcome_type == "binomial") {
-        mu_a_hat[validation, a_index] <- bound(
-          mu_a_hat[validation, a_index],
-          0,
-          1,
-          epsilon
-        )
-      }
-    }
-
-    if (estimate_conditional_variance == TRUE) {
-      yhat <- SuperLearner::predict.SuperLearner(
-        mu_model,
-        newdata = data[training, c(X, A)],
-        onlySL = TRUE
-      )$pred
-      y2 <- (data[[Y]][training] - yhat)^2
-
-      yvar_model <- SuperLearner::SuperLearner(
-        Y = y2,
-        X = data[training, c(X, A), drop = FALSE],
-        SL.library = learners_outcome,
-        family = outcome_family,
-        cvControl = cv_control,
-        env = environment(SuperLearner::SuperLearner)
-      )
-
-      condvar_hat[validation] <- SuperLearner::predict.SuperLearner(
-        yvar_model,
-        newdata = data[validation, c(X, A)],
-        onlySL = TRUE
-      )$pred
-      condvar_hat[validation] <- ifelse(
-        condvar_hat[validation] < epsilon,
-        epsilon,
-        condvar_hat[validation]
-      )
-    }
-  }
-
-  for (a_index in seq_along(As)) {
-    ind <- data[[A]] == As[a_index]
-    mu_hat[ind] <- mu_a_hat[ind, a_index]
-    pi_hat[ind] <- pi_a_hat[ind, a_index]
-  }
+  nuis <- estimate_point_nuisance(
+    data, X, A, Y,
+    learners_trt = learners_trt,
+    learners_outcome = learners_outcome,
+    outer_folds = outer_folds,
+    inner_folds = inner_folds,
+    outcome_type = outcome_type,
+    propensity = "one_vs_rest",
+    estimate_conditional_variance = estimate_conditional_variance,
+    epsilon = epsilon,
+    cv = cv
+  )
 
   list(
-    pi_a = pi_a_hat,
-    mu_a = mu_a_hat,
-    mu = mu_hat,
-    pi = pi_hat,
-    condvar = condvar_hat
+    pi_a    = nuis$pi_a,
+    mu_a    = nuis$mu_a,
+    mu      = nuis$mu,
+    pi      = nuis$pi_obs,
+    condvar = nuis$condvar
   )
 }
 

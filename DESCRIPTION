@@ -13,7 +13,6 @@ Imports:
     checkmate,
     cli,
     generics,
-    glue,
     mvtnorm,
     origami,
     purrr,

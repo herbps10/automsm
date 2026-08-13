@@ -9,20 +9,24 @@ simulate_longitudinal_dose_response(
   tau = 3,
   beta0 = -1,
   beta1 = 0.5,
+  binary = TRUE,
+  sigma = 0.1,
   seed = NULL
 )
 }
 \arguments{
-\item{N}{sample size}
+\item{N}{sample size.}
 
-\item{tau}{number of time pionts}
+\item{tau}{number of time points.}
 
-\item{beta0}{intercept of the outcome model}
+\item{beta0}{intercept of the outcome model.}
 
 \item{beta1}{coefficient on the cumulative treatment duration in
-the outcome model (logit scale)}
+the outcome model (logit scale).}
 
-\item{seed}{random number seed (optional)}
+\item{binary}{whether to simulate binary (default) or continuous outcomes.}
+
+\item{seed}{random number seed (optional).}
 }
 \value{
 data frame of simulated dta with columns L_1, A_1, ..., L_tau, A_tau, Y

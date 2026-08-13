@@ -94,8 +94,8 @@ within each outer cross-fitting fold.}
 \item{plugin}{A list with the plug-in point estimate (\code{est}).}
 \item{onestep}{A list with the one-step point estimate (\code{est}), standard
 errors (\code{se}), confidence-interval bounds (\code{lower}, \code{upper}),
-the estimated efficient influence function (\code{eif}), the projected
-conditional means (\code{psi}), and joint draws (\code{joint_draws}).}
+the estimated efficient influence function (\code{eif}), and joint draws
+(\code{joint_draws}).}
 }}
 }
 \description{

@@ -4,14 +4,22 @@
 \alias{simulate_cate}
 \title{Simulate example data for the Conditional Average Treatment Effect NP-MSM.}
 \usage{
-simulate_cate(N = 1000, sigma = 0.1, nonlinear = TRUE, seed = NULL)
+simulate_cate(
+  N = 1000,
+  nonlinear = TRUE,
+  binary = TRUE,
+  sigma = 0.1,
+  seed = NULL
+)
 }
 \arguments{
 \item{N}{Sample size.}
 
-\item{sigma}{Conditional standard deviation of the outcome.}
+\item{nonlinear}{Whether to generate a nonlinear (\code{TRUE}; default) or linear (\code{FALSE}) outcome.}
 
-\item{nonlinear}{Whether to generate a nonlinear (default) or linear outcome}
+\item{binary}{Whether to simulate binary (\code{TRUE}; default) or continuous (\code{FALSE}) outcomes.}
+
+\item{sigma}{Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).}
 
 \item{seed}{Random number seed (optional).}
 }

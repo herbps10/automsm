@@ -7,8 +7,9 @@
 simulate_dose_response(
   N = 1000,
   treatments = 25,
-  sigma = 0.1,
   nonlinear = TRUE,
+  binary = TRUE,
+  sigma = 0.1,
   seed = NULL
 )
 }
@@ -17,9 +18,11 @@ simulate_dose_response(
 
 \item{treatments}{number of discrete treatments}
 
-\item{sigma}{conditional standard deviation of outcome}
+\item{nonlinear}{Whether to generate a nonlinear (\code{TRUE}; default) or linear (\code{FALSE}) outcome.}
 
-\item{nonlinear}{whether to simulate a non-linear response}
+\item{binary}{Whether to simulate binary (\code{TRUE}; default) or continuous (\code{FALSE}) outcomes.}
+
+\item{sigma}{Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).}
 
 \item{seed}{random number seed (optional)}
 }

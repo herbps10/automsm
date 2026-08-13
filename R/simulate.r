@@ -7,8 +7,9 @@
 #' track the nonlinear shape.
 #'
 #' @param N Sample size.
-#' @param sigma Conditional standard deviation of the outcome.
-#' @param nonlinear Whether to generate a nonlinear (default) or linear outcome
+#' @param nonlinear Whether to generate a nonlinear (\code{TRUE}; default) or linear (\code{FALSE}) outcome.
+#' @param binary Whether to simulate binary (\code{TRUE}; default) or continuous (\code{FALSE}) outcomes.
+#' @param sigma Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).
 #' @param seed Random number seed (optional).
 #' @return data frame of simulated data with columns \code{X1}, \code{X2},
 #'   \code{A}, and \code{Y}.
@@ -16,8 +17,9 @@
 #' @export
 simulate_cate <- function(
     N = 1e3,
-    sigma = 0.1,
     nonlinear = TRUE,
+    binary = TRUE,
+    sigma = 0.1,
     seed = NULL
 ) {
   if (!is.null(seed)) {
@@ -28,35 +30,45 @@ simulate_cate <- function(
   X2 <- stats::runif(N)
   A <- stats::rbinom(N, 1, stats::plogis(X1))
 
-  if(nonlinear == TRUE) {
+  if(isTRUE(nonlinear)) {
     cate <- sin(2 * pi * X2)
   }
   else {
-    cate <- 1
+    cate <- 0.25 * X2
   }
 
   mu0 <- 0.5 * X1
   mu1 <- 0.5 * X1 + cate
+
+  if(isTRUE(binary)) {
+    mu0 <- plogis(mu0)
+    mu1 <- plogis(mu1)
+  }
+
   mu <- ifelse(A == 1, mu1, mu0)
-  Y <- stats::rnorm(N, mu, sigma)
+
+  Y <- if(isTRUE(binary)) stats::rbinom(N, 1, mu) else stats::rnorm(N, mu, sigma)
 
   data.frame(X1, X2, A, Y)
 }
 
 #' Simulate example data for the conditional dose-response curve NP-MSM.
+#'
 #' @param N sample size
 #' @param treatments number of discrete treatments
-#' @param sigma conditional standard deviation of outcome
-#' @param nonlinear whether to simulate a non-linear response
+#' @param nonlinear Whether to generate a nonlinear (\code{TRUE}; default) or linear (\code{FALSE}) outcome.
+#' @param binary Whether to simulate binary (\code{TRUE}; default) or continuous (\code{FALSE}) outcomes.
+#' @param sigma Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).
 #' @param seed random number seed (optional)
 #' @return data frame of simulated data
-#' @importFrom stats runif rnorm
+#' @importFrom stats runif rnorm rbinom
 #' @export
 simulate_dose_response <- function(
   N = 1e3,
   treatments = 25,
-  sigma = 0.1,
   nonlinear = TRUE,
+  binary = TRUE,
+  sigma = 0.1,
   seed = NULL
 ) {
   if (!is.null(seed)) {
@@ -66,11 +78,15 @@ simulate_dose_response <- function(
   X1 <- stats::runif(N)
   X2 <- stats::runif(N)
   A <- sample(1:treatments, N, replace = TRUE)
-  if(nonlinear == TRUE) {
-    Y <- stats::rnorm(N, 2 / A, sigma)
+
+  mu <- if(isTRUE(nonlinear)) 2 / A else A
+
+  if(isTRUE(binary)) {
+    mu <- plogis(mu)
+    Y <- stats::rbinom(N, 1, mu)
   }
   else {
-    Y <- stats::rnorm(N, A, sigma)
+    Y <- stats::rnorm(N, mu, sigma)
   }
 
   data.frame(X1, X2, A, Y)
@@ -86,12 +102,13 @@ simulate_dose_response <- function(
 #' and treatment, and the treatment A_t is assigned via a logistic model on the
 #' history.
 #'
-#' @param N sample size
-#' @param tau number of time pionts
-#' @param beta0 intercept of the outcome model
+#' @param N sample size.
+#' @param tau number of time points.
+#' @param beta0 intercept of the outcome model.
 #' @param beta1 coefficient on the cumulative treatment duration in
-#'   the outcome model (logit scale)
-#' @param seed random number seed (optional)
+#'   the outcome model (logit scale).
+#' @param binary whether to simulate binary (default) or continuous outcomes.
+#' @param seed random number seed (optional).
 #' @return data frame of simulated dta with columns L_1, A_1, ..., L_tau, A_tau, Y
 #' @importFrom stats runif rbinom rnorm plogis
 #' @export
@@ -100,6 +117,8 @@ simulate_longitudinal_dose_response <- function(
   tau = 3,
   beta0 = -1,
   beta1 = 0.5,
+  binary = TRUE,
+  sigma = 0.1,
   seed = NULL
 ) {
   if (!is.null(seed)) {
@@ -125,12 +144,14 @@ simulate_longitudinal_dose_response <- function(
   }
 
   cumtrt <- rowSums(A)
-  mu <- stats::plogis(beta0 + beta1 * cumtrt + 0.2 * L[, tau])
-  Y <- stats::rbinom(
-    N,
-    1,
-    mu
-  )
+  if(binary == TRUE) {
+    mu <- stats::plogis(beta0 + beta1 * cumtrt + 0.2 * L[, tau])
+    Y <- stats::rbinom(N, 1, mu)
+  }
+  else {
+    mu <- beta0 + beta1 * cumtrt + 0.2 * L[, tau]
+    Y <- stats::rnorm(N, mu, sigma)
+  }
 
   out <- data.frame(matrix(nrow = N, ncol = 2 * tau + 1))
   colnames(out) <- c(paste0("L", 1:tau), paste0("A", 1:tau), "Y")

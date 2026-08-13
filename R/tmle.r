@@ -18,17 +18,10 @@ tmle_mle <- function(p, fluctuation_model, ...) {
 
 #' Clever covariate for marginal distribution of covariates
 #' @noRd
-calculate_K <- function(Lm, psi, Q, beta, design_matrix, Minv) {
-  n <- dim(design_matrix)[1]
+calculate_K <- function(Lm, psi, beta, design_matrix, Minv) {
   p <- dim(Minv)[1]
-
-  K <- torch::torch_tensor(matrix(0, n, p))
-  for (i in 1:n) {
-    K[i, ] <- Minv$matmul(dL(Lm, psi[i, drop = FALSE], beta, design_matrix[i, , drop = FALSE])[[
-      1
-    ]])$reshape(p)
-  }
-  K
+  Kdot <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p)
+  Kdot$matmul(Minv)
 }
 
 Q_fluctuation <- function(epsilon, K, Q) {
