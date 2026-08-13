@@ -283,20 +283,13 @@ cate <- function(
         Minv
       )
 
-      epsilon_star <- tmle_mle(
-        p,
-        tmle_fluctuation_model,
-        mu_star,
-        mu0_star,
-        mu1_star,
-        clever$clever,
-        clever$clever0,
-        clever$clever1,
-        K,
-        Q_star,
-        Yt,
-        design_matrix
-      )
+      epsilon_star <- tmle_mle(p, function(epsilon) {
+        tmle_fluctuation_model(
+          epsilon, mu_star, mu0_star, mu1_star,
+          clever$clever, clever$clever0, clever$clever1,
+          K, Q_star, Yt, design_matrix
+        )
+      })
 
       if (any(is.nan(as.numeric(epsilon_star)))) {
         warning("TMLE failed to converge.")

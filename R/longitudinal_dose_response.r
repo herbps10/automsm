@@ -367,13 +367,12 @@ longitudinal_dose_response <- function(
           Lm(loss, working_model), HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
         )
 
-        epsilon_t <- tmle_mle(
-          p,
-          node_fluctuation_model,
-          mu_star_nodes[[t]],
-          mu_star_nodes[[t + 1]],
-          cleverA_t, clever_K, Q_star
-        )
+        epsilon_t <- tmle_mle(p, function(epsilon) {
+          node_fluctuation_model(
+            epsilon, mu_star_nodes[[t]], mu_star_nodes[[t + 1]],
+            cleverA_t, clever_K, Q_star
+          )
+        })
 
         max_eps <- max(max_eps, max(abs(as.numeric(epsilon_t))))
         #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {max_eps}\n\n"))
