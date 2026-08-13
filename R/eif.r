@@ -1,8 +1,10 @@
+# `p` is the working-model coefficient count and is always required.
+# It is distinct from d = dim(design_matrix)[3], the design width.
+
 #' Convenience notation for writing composition of loss function and working model
 #' @noRd
 Lm <- function(loss, working_model) {
   function(t, beta, X) {
-    pred <- working_model(beta, X)
     l <- loss(working_model(beta, X), t)
     if(length(dim(l)) > 1) l$sum(2) else l
   }
@@ -17,30 +19,13 @@ dL <- function(Lm, t, beta, X, weight = 1) {
   torch::autograd_grad(l, list(beta), create_graph = TRUE, retain_graph = TRUE)
 }
 
-#' @importFrom purrr map
-#' @importFrom torch autograd_grad torch_cat
-#' @noRd
-dL_dbeta <- function(Lm, t, beta, X, p) {
-  beta$grad <- NULL
-  l <- dL(Lm, t, beta, X)[[1]]
-  r <- purrr::map(1:length(l), function(index) {
-    torch::autograd_grad(
-      l[index],
-      list(beta),
-      retain_graph = TRUE,
-      create_graph = TRUE
-    )[[1]]$reshape(c(p, 1))
-  })
-  torch::torch_cat(r, dim = 2)
-}
-
 #' @importFrom torch torch_reshape autograd_grad torch_cat
 #' @importFrom purrr map
 #' @noRd
 ddL <- function(Lm, t, beta, X, p, weight = 1) {
   beta$grad <- NULL
   l <- dL(Lm, t, beta, X, weight = 1)[[1]]
-  r <- map(1:length(l), function(index) {
+  r <- purrr::map(1:length(l), function(index) {
     torch::torch_reshape(
       torch::autograd_grad(
         l[index],
@@ -62,31 +47,33 @@ grad_dL <- function(Lm, t, beta, X) {
   t$grad <- NULL
   l <- dL(Lm, t, beta, X)[[1]]
   r <- map(1:length(l), function(index) {
-    torch::torch_reshape(
-      torch::autograd_grad(
-        l[index],
-        list(t),
-        retain_graph = TRUE,
-        create_graph = TRUE,
-        allow_unused = TRUE
-      )[[1]],
-      shape = c(1, k)
-    )
+    g <- torch::autograd_grad(
+      l[index],
+      list(t),
+      retain_graph = TRUE,
+      create_graph = TRUE,
+      allow_unused = TRUE
+    )[[1]]
+
+    if(is.null(g)) {
+      torch::torch_zeros(c(1, k))
+    }
+    else {
+      torch::torch_reshape(g, shape = c(1, k))
+    }
   })
-  torch::torch_cat(r)
+  torch::torch_cat(r) # p x K
 }
 
 #' @importFrom torch optim_lbfgs torch_tensor
 #' @noRd
-B <- function(Lm, psi, design_matrix, Q, p = NULL) {
-  if(is.null(p)) p <- rev(dim(design_matrix))[1]
+B <- function(Lm_fn, psi, design_matrix, Q, p) {
   beta <- torch_tensor(rep(0, p), requires_grad = TRUE)
   optimizer <- torch::optim_lbfgs(beta)
   for (iter in 1:2) {
     optimizer$step(function() {
       optimizer$zero_grad()
-      value <- Lm(psi, beta, design_matrix)$mul(Q)$sum()
-      #cat(glue::glue("Iteration: {iter} value: {as.numeric(value)} \n\n"))
+      value <- Lm_fn(psi, beta, design_matrix)$mul(Q)$sum()
       value$backward(retain_graph = TRUE)
       value
     })
@@ -96,84 +83,60 @@ B <- function(Lm, psi, design_matrix, Q, p = NULL) {
 }
 
 #' @noRd
-objective <- function(Lm, psi, Q, design_matrix, beta) {
+objective <- function(Lm, psi, beta, design_matrix, Q) {
   dL(Lm, psi, beta, design_matrix, weight = Q)[[1]]
 }
 
 #' @importFrom torch torch_cat autograd_grad
 #' @importFrom purrr map
 #' @noRd
-dobjective_dpsi <- function(Lm, psi, Q, design_matrix, beta, p = NULL) {
+dobjective_dpsi <- function(Lm, psi, beta, design_matrix, Q, p) {
   n <- dim(design_matrix)[1]
   k <- dim(design_matrix)[2]
-  if(is.null(p)) p <- dim(design_matrix)[3]
-
-  obj <- objective(Lm, psi, Q, design_matrix, beta)
+  obj <- objective(Lm, psi, beta, design_matrix, Q)
   r <- map(1:p, function(index) {
-    autograd_grad(obj[index], psi, retain_graph = TRUE)[[1]]$reshape(c(
-      1,
-      n,
-      k
-    ))
+    autograd_grad(obj[index], psi, retain_graph = TRUE)[[1]]$reshape(c(1, n, k))
   })
-  return(torch::torch_cat(r)$transpose(1, 3))
+  return(torch::torch_cat(r)$transpose(1, 3)) # K x n x p
 }
 
 #' @importFrom torch autograd_grad torch_cat
 #' @importFrom purrr map
 #' @noRd
-dobjective_dQ <- function(Lm, psi, Q, design_matrix, beta, p = NULL) {
-  if(is.null(p)) p <- rev(dim(design_matrix))[1]
+dobjective_dQ <- function(Lm, psi, beta, design_matrix, Q, p) {
   n <- dim(design_matrix)[1]
-
-  obj <- objective(Lm, psi, Q, design_matrix, beta)
+  obj <- objective(Lm, psi, beta, design_matrix, Q)
   r <- map(1:p, function(index) {
     autograd_grad(obj[index], Q, retain_graph = TRUE)[[1]]$reshape(c(n, 1))
   })
-  torch::torch_cat(r, dim = 2)
+  torch::torch_cat(r, dim = 2) # n x p
 }
 
 #' @importFrom purrr map
 #' @importFrom torch autograd_grad torch_cat
 #' @noRd
-dobjective_dbeta <- function(Lm, psi, Q, design_matrix, beta, p =  NULL) {
-  if(is.null(p)) p <- dim(design_matrix)[3]
-  obj <- objective(Lm, psi, Q, design_matrix, beta)
+dobjective_dbeta <- function(Lm, psi, beta, design_matrix, Q, p) {
+  obj <- objective(Lm, psi, beta, design_matrix, Q)
   r <- map(1:p, function(index) {
     autograd_grad(obj[index], beta, retain_graph = TRUE)[[1]]$reshape(c(p, 1))
   })
-  torch::torch_cat(r, dim = 2)
+  torch::torch_cat(r, dim = 2) # p x p
 }
 
-dB_dpsi <- function(Lm, psi, Q, design_matrix, beta) {
-  -dobjective_dpsi(
-    Lm,
-    psi,
-    Q,
-    design_matrix,
-    beta
-  )$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, Q, design_matrix, beta)))
+dB_dpsi <- function(Lm, psi, beta, design_matrix, Q, p) {
+  -dobjective_dpsi(Lm, psi, beta, design_matrix, Q, p)$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p)))
 }
 
-dB_dQ <- function(Lm, psi, Q, design_matrix, beta) {
-  -dobjective_dQ(
-    Lm,
-    psi,
-    Q,
-    design_matrix,
-    beta
-  )$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, Q, design_matrix, beta)))
+dB_dQ <- function(Lm, psi, beta, design_matrix, Q, p) {
+  -dobjective_dQ(Lm, psi, beta, design_matrix, Q, p)$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p)))
 }
 
 #' @importFrom torch torch_tensor
 #' @noRd
-normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p = NULL) {
-  if(is.null(p)) p <- dim(design_matrix)[3]
+normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p) {
   n <- dim(design_matrix)[1]
-  M <- matrix(0, p, p)
   M <- ddL(Lm, psi, beta, design_matrix, p, Q) / n
-  Minv <- solve(M)
-  torch::torch_tensor(Minv)
+  torch::torch_tensor(M$inverse())
 }
 
 #' Per-observation gradient of the loss wrt beta (the \dot{L}_m / D_2 term)
@@ -182,7 +145,7 @@ normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p = NULL) {
 batched_dL_dbeta <- function(Lm, psi, beta, design_matrix, p) {
   n <- dim(design_matrix)[1]
   Lm_vec <- Lm(psi, beta, design_matrix)
-  D2 <- torch::torch_cat(
+  torch::torch_cat(
     purrr::map(1:n, function(i) {
       beta$grad <- NULL
       sel <- torch::torch_zeros(n)
@@ -224,18 +187,13 @@ batched_NablaLdot <- function(Lm, psi, beta, design_matrix, p, k) {
 }
 
 #' @noRd
-eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
+eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p) {
   n <- dim(design_matrix)[1]
   k <- dim(design_matrix)[2]
-  if(is.null(p)) p <- dim(design_matrix)[3]
-
   Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q, p)
-
   D2 <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p)
 
-  # D1 = NablaLdot * Delta
   grad_blocks <- batched_NablaLdot(Lm, psi, beta, design_matrix, p, k)
-
   D1 <- torch::torch_cat(
     purrr::map(grad_blocks, function(gb) {
       (gb * Delta)$sum(dim = 2)$reshape(c(n, 1))

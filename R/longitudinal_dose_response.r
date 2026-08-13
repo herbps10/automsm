@@ -134,7 +134,7 @@ longitudinal_dose_response <- function(
   regimes,
   summary_measures = NULL,
   outcome_type = "binomial",
-  loss = loss_weighted_sum(loss_squared_error),
+  loss = loss_squared_error,
   working_model = working_model_linear,
   p = NULL,
   learners_trt = "SL.glm",
@@ -218,6 +218,7 @@ longitudinal_dose_response <- function(
     )
   }
 
+  Lm_fn <- Lm(loss, working_model)
 
   # Build the design tensor
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
@@ -238,7 +239,8 @@ longitudinal_dose_response <- function(
 
     mat1 <- build_design_block(1)
     terms <- colnames(mat1)
-    if(is.null(p)) p <- ncol(mat1)
+    d <- ncol(mat1)
+    if(is.null(p)) p <- d
 
     design_matrix <- torch::torch_zeros(c(n, k, p))
     design_matrix[, 1, ] <- mat1
@@ -247,7 +249,8 @@ longitudinal_dose_response <- function(
   else {
     mat <- stats::model.matrix(formula, data = data)
     terms <- colnames(mat)
-    if(is.null(p)) p <- ncol(mat)
+    d <- ncol(mat)
+    if(is.null(p)) p <- d
 
     mat_tensor <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
 
@@ -260,7 +263,7 @@ longitudinal_dose_response <- function(
   # psi is n x K: the ICE conditional means psi_P^{(\bar{a})}(L_1) per regime.
   psi <- torch::torch_tensor(t(nuisance$mu[, , 1]), requires_grad = TRUE)
 
-  plugin <- B(Lm(loss, working_model), psi, design_matrix, Q, p)
+  plugin <- B(Lm_fn, psi, design_matrix, Q, p)
   beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
   # Delta: longitudinal ICE-based EIF term (n x K)
@@ -282,7 +285,7 @@ longitudinal_dose_response <- function(
 
   ##### One-step estimator
   onestep_est <- onestep(
-    Lm(loss, working_model),
+    Lm_fn,
     psi,
     beta,
     design_matrix,
@@ -360,11 +363,11 @@ longitudinal_dose_response <- function(
         mu_a_star <- mu_a_star$detach()$clone()
         mu_a_star$requires_grad_(TRUE)
 
-        Minv <- normalizing_matrix(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Q_star, p)
-        clever_K <- calculate_K(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Minv)
+        Minv <- normalizing_matrix(Lm_fn, mu_a_star, beta_star, design_matrix, Q_star, p)
+        clever_K <- calculate_K(Lm_fn, mu_a_star, beta_star, design_matrix, Minv)
 
         cleverA_t <- calculate_clever_node(
-          Lm(loss, working_model), HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
+          Lm_fn, HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
         )
 
         epsilon_t <- tmle_mle(p, function(epsilon) {
@@ -400,7 +403,7 @@ longitudinal_dose_response <- function(
       # After the backward sweep, node 1 holds the updated psi = ICE at L1
       mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
       mu_a_star$requires_grad_(TRUE)
-      beta_star <- B(Lm(loss, working_model), mu_a_star$detach(), design_matrix, Q_star$detach(), p = p)$detach()$clone()
+      beta_star <- B(Lm_fn, mu_a_star$detach(), design_matrix, Q_star$detach(), p)$detach()$clone()
       beta_star$requires_grad_(TRUE)
 
       if (abs(max_eps) < 1e-2) break
@@ -410,7 +413,7 @@ longitudinal_dose_response <- function(
     mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
     mu_a_star$requires_grad_(TRUE)
 
-    tmle_est <- B(Lm(loss, working_model), mu_a_star$detach(), design_matrix, Q_star$detach(), p = p)
+    tmle_est <- B(Lm_fn, mu_a_star$detach(), design_matrix, Q_star$detach(), p)
 
     # Delta reuses the telescoping ICE residual, now computed from the updated (fluctuated) nodes
     resid_star <- array(0, dim = c(k, n, tau))
@@ -421,7 +424,7 @@ longitudinal_dose_response <- function(
     Delta_star <- t(apply(resid_star, c(1, 2), sum))
 
     tmle_eif <- eif(
-      Lm(loss, working_model), mu_a_star, tmle_est, design_matrix, Q_star$detach(), torch::torch_tensor(Delta_star), p = p
+      Lm_fn, mu_a_star, tmle_est, design_matrix, Q_star$detach(), torch::torch_tensor(Delta_star), p
     )
 
     tmle_se <- apply(tmle_eif, 2, stats::sd) / sqrt(n)
@@ -432,6 +435,7 @@ longitudinal_dose_response <- function(
   res <- list(
     estimand = "longitudinal_dose_response",
     p = p,
+    d = d,
     n = n,
     tau = tau,
     formula = formula,

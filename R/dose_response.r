@@ -10,6 +10,12 @@
 #' @param loss The marginal structural model loss function measuring the fidelity of the
 #'   working model to the target functional (e.g. \code{loss_squared_error}).
 #' @param working_model The marginal structural model working model (e.g. \code{working_model_linear}).
+#' @param p Integer giving the dimension of the working-model parameter
+#'   \eqn{\beta} (the number of working-model coefficients). If \code{NULL}
+#'   (the default), \code{p} is inferred from the number of columns in the
+#'   design matrix produced by \code{formula}. When a working model whose
+#'   coefficient dimension does not match the \code{formula}-based design, \code{p}
+#'   should be supplied explicitly to match the working model's true number of coefficients.
 #' @param learners_trt A character vector of \pkg{SuperLearner} libraries for estimating
 #'   the propensity scores.
 #' @param learners_outcome A character vector of \pkg{SuperLearner} libraries for
@@ -63,6 +69,7 @@ dose_response <- function(
   outcome_type = "binomial",
   loss = loss_squared_error,
   working_model = working_model_linear,
+  p = NULL,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -81,7 +88,7 @@ dose_response <- function(
 ) {
   validate_msm_arguments(
     data, X, A, Y, formula,
-    outcome_type, loss, working_model,
+    outcome_type, loss, working_model, p,
     learners_trt, learners_outcome,
     outer_folds, inner_folds,
     tmle, tmle_maxiter, tmle_linear,
@@ -106,9 +113,12 @@ dose_response <- function(
     )
   }
 
+  Lm_fn <- Lm(loss, working_model)
+
   mat <- stats::model.matrix(formula, data = data)
   terms <- colnames(mat)
-  p <- ncol(mat)
+  d <- ncol(mat)
+  if(is.null(p)) p <- d
 
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
 
@@ -140,7 +150,7 @@ dose_response <- function(
   }
 
   Delta <- H$mul((Yt - torch::torch_tensor(nuisance$mu))$reshape(c(n, 1)))
-  base <- estimate_plugin_and_onestep(loss, working_model, design_matrix, psi, Q, Delta)
+  base <- estimate_plugin_and_onestep(Lm_fn, design_matrix, psi, Q, Delta, p)
 
   tmle_res <- NULL
   bayes_tmle_res <- NULL
@@ -213,7 +223,7 @@ dose_response <- function(
           mu_a <- torch::torch_sigmoid(mu_a$logit() + clever$cleverA$matmul(epsilon))
         }
 
-        beta <- B(Lm(loss, working_model), mu_a, design_matrix, Q)
+        beta <- B(Lm_fn, mu_a, design_matrix, Q, p)
 
         if (tmle_linear == TRUE) {
           target <- as.numeric(
@@ -228,7 +238,7 @@ dose_response <- function(
         target <- target + bayes_prior(as.numeric(beta))
         jacobian <- torch::torch_zeros(c(p, p))
 
-        J <- dB_dpsi(Lm(loss, working_model), mu_a, Q, design_matrix, beta)
+        J <- dB_dpsi(Lm_fn, mu_a, beta, design_matrix, Q, p)
         for (k in 1:K) {
           if (tmle_linear == TRUE) {
             jacobian <- jacobian +
@@ -243,7 +253,7 @@ dose_response <- function(
 
         jacobian <- jacobian +
           torch::torch_transpose(
-            dB_dQ(Lm(loss, working_model), mu_a, Q, design_matrix, beta),
+            dB_dQ(Lm_fn, mu_a, beta, design_matrix, Q, p),
             1,
             2
           )$matmul(dQ_fluctuation_depsilon(epsilon, clever_K, Q))
@@ -265,10 +275,10 @@ dose_response <- function(
       mu_a_star <- mu_a_star$detach()$clone()
       mu_a_star$requires_grad_(TRUE)
 
-      Minv <- normalizing_matrix(Lm(loss, working_model), mu_a_star, beta_star, design_matrix, Q_star)
+      Minv <- normalizing_matrix(Lm_fn, mu_a_star, beta_star, design_matrix, Q_star, p)
 
       clever_K <- calculate_K(
-        Lm(loss, working_model),
+        Lm_fn,
         mu_a_star,
         beta_star,
         design_matrix,
@@ -276,7 +286,7 @@ dose_response <- function(
       )
 
       clever <- calculate_clever(
-        Lm(loss, working_model),
+        Lm_fn,
         H,
         HA,
         mu_a_star,
@@ -318,10 +328,11 @@ dose_response <- function(
       Q_star <- Q_fluctuation(epsilon_star, clever_K, Q_star)
 
       beta_star <- B(
-        Lm(loss, working_model),
+        Lm_fn,
         mu_a_star$detach(),
         design_matrix,
-        Q_star$detach()
+        Q_star$detach(),
+        p
       )$detach()$clone()
       beta_star$requires_grad_(TRUE)
 
@@ -334,19 +345,21 @@ dose_response <- function(
     mu_a_star$requires_grad_(TRUE)
 
     tmle_est <- B(
-      Lm(loss, working_model),
+      Lm_fn,
       mu_a_star$detach(),
       design_matrix,
-      Q_star$detach()
+      Q_star$detach(),
+      p
     )
 
     tmle_eif <- eif(
-      Lm(loss, working_model),
+      Lm_fn,
       mu_a_star,
       tmle_est,
       design_matrix,
       Q_star$detach(),
-      H$mul((Yt - mu_star$detach())$reshape(c(n, 1)))
+      H$mul((Yt - mu_star$detach())$reshape(c(n, 1))),
+      p
     )
     tmle_se <- apply(tmle_eif, 2, stats::sd) / sqrt(n)
     tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
@@ -409,7 +422,7 @@ dose_response <- function(
   }
 
   assemble_result(
-    "dose_response", p, n, formula, working_model, loss, terms, learners_trt, learners_outcome, nuisance, plugin = list(est = as.numeric(base$plugin$est)), onestep = base$onestep, tmle_res, bayes_tmle_res
+    "dose_response", p, d, n, formula, working_model, loss, terms, learners_trt, learners_outcome, nuisance, plugin = list(est = as.numeric(base$plugin$est)), onestep = base$onestep, tmle_res, bayes_tmle_res
   )
 }
 

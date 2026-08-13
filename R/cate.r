@@ -10,6 +10,12 @@
 #' @param loss The marginal structural model loss function measuring the fidelity of the
 #'   working model to the target functional (e.g. \code{loss_squared_error}).
 #' @param working_model The marginal structural model working model (e.g. \code{working_model_linear}).
+#' @param p Integer giving the dimension of the working-model parameter
+#'   \eqn{\beta} (the number of working-model coefficients). If \code{NULL}
+#'   (the default), \code{p} is inferred from the number of columns in the
+#'   design matrix produced by \code{formula}. When a working model whose
+#'   coefficient dimension does not match the \code{formula}-based design, \code{p}
+#'   should be supplied explicitly to match the working model's true number of coefficients.
 #' @param learners_trt A character vector of \pkg{SuperLearner} libraries for estimating
 #'   the propensity scores.
 #' @param learners_outcome A character vector of \pkg{SuperLearner} libraries for
@@ -58,8 +64,9 @@ cate <- function(
   Y,
   formula,
   outcome_type = "binomial",
-  loss = loss_weighted_sum(loss_squared_error),
+  loss = loss_squared_error,
   working_model = working_model_linear,
+  p = NULL,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -78,7 +85,7 @@ cate <- function(
 ) {
   validate_msm_arguments(
     data, X, A, Y, formula,
-    outcome_type, loss, working_model,
+    outcome_type, loss, working_model, p,
     learners_trt, learners_outcome,
     outer_folds, inner_folds,
     tmle, tmle_maxiter, tmle_linear,
@@ -104,13 +111,16 @@ cate <- function(
     )
   }
 
+  Lm_fn <- Lm(loss, working_model)
+
   psi <- torch::torch_tensor(nuisance$mu1 - nuisance$mu0, requires_grad = TRUE)$reshape(c(n, 1))
 
   # Design matrix
   mat <- model.matrix(formula, data = data)
   terms <- colnames(mat)
   design_matrix <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
-  p <- ncol(mat)
+  d <- ncol(mat)
+  if(is.null(p)) p <- d
 
   Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
   H0 <- torch_tensor(-1 / (1 - nuisance$pi))
@@ -120,14 +130,7 @@ cate <- function(
 
   Delta <- (H * (Yt - torch::torch_tensor(nuisance$mu)))$reshape(c(n, 1))
 
-  base <- estimate_plugin_and_onestep(
-    loss,
-    working_model,
-    design_matrix,
-    psi,
-    Q,
-    Delta
-  )
+  base <- estimate_plugin_and_onestep(Lm_fn, design_matrix, psi, Q, Delta, p)
 
   ##### TMLE
 
@@ -204,10 +207,11 @@ cate <- function(
       } else {
         psi <- (mu1 - mu0)$reshape(c(n, 1))
         beta <- B(
-          Lm(loss, working_model),
+          Lm_fn,
           psi$detach()$clone(),
           design_matrix,
-          Q$detach()$clone()
+          Q$detach()$clone(),
+          p
         )
 
         if (tmle_linear == TRUE) {
@@ -222,7 +226,7 @@ cate <- function(
         # Prior
         target <- target + bayes_prior(as.numeric(beta))
         # Jacobian adjustment
-        jacobian <- dB_dpsi(Lm(loss, working_model), psi, Q, design_matrix, beta)$transpose(2, 3)
+        jacobian <- dB_dpsi(Lm_fn, psi, beta, design_matrix, Q, p)$transpose(2, 3)
         if (tmle_linear == TRUE) {
           jacobian <- jacobian$matmul(clever1 - clever0)
         } else {
@@ -236,7 +240,7 @@ cate <- function(
 
         jacobian <- jacobian +
           torch::torch_transpose(
-            dB_dQ(Lm(loss, working_model), psi, Q, design_matrix, beta),
+            dB_dQ(Lm_fn, psi, beta, design_matrix, Q, p),
             1,
             2
           )$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
@@ -261,10 +265,10 @@ cate <- function(
       psi_star <- (mu1_star - mu0_star)$detach()$clone()
       psi_star$requires_grad_(TRUE)
 
-      Minv <- normalizing_matrix(Lm(loss, working_model), psi_star, beta_star, design_matrix, Q_star)
+      Minv <- normalizing_matrix(Lm_fn, psi_star, beta_star, design_matrix, Q_star, p)
 
       K <- calculate_K(
-        Lm(loss, working_model),
+        Lm_fn,
         psi_star,
         beta_star,
         design_matrix,
@@ -272,7 +276,7 @@ cate <- function(
       )
 
       clever <- calculate_clever(
-        Lm(loss, working_model),
+        Lm_fn,
         H,
         H0,
         H1,
@@ -313,10 +317,11 @@ cate <- function(
       Q_star <- Q_fluctuation(epsilon_star, K, Q_star)
 
       beta_star <- B(
-        Lm(loss, working_model),
+        Lm_fn,
         psi_star,
         design_matrix,
-        Q_star
+        Q_star,
+        p
       )$detach()$clone()
       beta_star$requires_grad_(TRUE)
 
@@ -328,14 +333,15 @@ cate <- function(
     tmle_est <- tmle_se <- tmle_lower <- tmle_upper <- rep(NA, p)
     tmle_eif <- matrix(NA, ncol = p, nrow = n)
     if (converged == TRUE) {
-      tmle_est <- B(Lm(loss, working_model), psi_star, design_matrix, Q_star)
+      tmle_est <- B(Lm_fn, psi_star, design_matrix, Q_star, p)
       tmle_eif <- eif(
-        Lm(loss, working_model),
+        Lm_fn,
         psi_star,
         tmle_est,
         design_matrix,
         Q_star,
-        (H * (Yt - mu_star[, 1]))$reshape(c(n, 1))
+        (H * (Yt - mu_star[, 1]))$reshape(c(n, 1)),
+        p
       )
       tmle_se <- apply(tmle_eif, 2, sd) / sqrt(n)
       tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
@@ -406,6 +412,7 @@ cate <- function(
   assemble_result(
     "cate",
     p,
+    d,
     n,
     formula,
     working_model,

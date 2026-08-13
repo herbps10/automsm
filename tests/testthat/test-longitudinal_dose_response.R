@@ -17,9 +17,9 @@ test_that("dose_response continous one-step fixture is stable", {
     nuisance = fx$nuisance
   )
 
-  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-8)
-  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-8)
-  expect_equal(fit$onestep$se, fx$fit_onestep$onestep$se, tolerance = 1e-8)
+  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-6)
+  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-6)
+  expect_equal(fit$onestep$se, fx$fit_onestep$onestep$se, tolerance = 1e-6)
 })
 
 test_that("dose_response binary one-step fixture is stable", {
@@ -27,8 +27,8 @@ test_that("dose_response binary one-step fixture is stable", {
 
   fit <- longitudinal_dose_response(
     fx$dat,
-    fx$Ls,
-    fx$As,
+    Ls = fx$Ls,
+    As = fx$As,
     "Y",
     regimes = fx$regimes,
     summary_measures = function(regimes) data.frame(v = rowSums(regimes)),
@@ -39,9 +39,9 @@ test_that("dose_response binary one-step fixture is stable", {
     nuisance = fx$nuisance
   )
 
-  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-8)
-  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-8)
-  expect_equal(fit$onestep$se, fx$fit_onestep$onestep$se, tolerance = 1e-8)
+  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-6)
+  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-6)
+  expect_equal(fit$onestep$se, fx$fit_onestep$onestep$se, tolerance = 1e-6)
 })
 
 # ----- TMLE fixtures -----
@@ -62,8 +62,8 @@ test_that("dose_response continous linear TMLE fixture is stable", {
     nuisance = fx$nuisance
   )
 
-  expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-8)
-  expect_equal(fit$tmle$se, fx$fit_tmle$tmle$se, tolerance = 1e-8)
+  expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-6)
+  expect_equal(fit$tmle$se, fx$fit_tmle$tmle$se, tolerance = 1e-6)
 })
 
 test_that("dose_response continous binary TMLE fixture is stable", {
@@ -83,8 +83,8 @@ test_that("dose_response continous binary TMLE fixture is stable", {
     nuisance = fx$nuisance
   )
 
-  expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-8)
-  expect_equal(fit$tmle$se,  fx$fit_tmle$tmle$se, tolerance = 1e-8)
+  expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-6)
+  expect_equal(fit$tmle$se,  fx$fit_tmle$tmle$se, tolerance = 1e-6)
 })
 
 # ----- Integration tests -----

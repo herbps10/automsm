@@ -16,10 +16,11 @@
 #'
 #' @return list of class \code{"automsm"}
 #' @noRd
-assemble_result <- function(estimand, p, n, formula, working_model, loss, terms, learners_trt, learners_outcome, nuisance, plugin, onestep, tmle, bayes_tmle, ...) {
+assemble_result <- function(estimand, p, d, n, formula, working_model, loss, terms, learners_trt, learners_outcome, nuisance, plugin, onestep, tmle, bayes_tmle, ...) {
   res <- list(
     estimand = estimand,
     p = p,
+    d = d,
     n = n,
     formula = formula,
     working_model = working_model,

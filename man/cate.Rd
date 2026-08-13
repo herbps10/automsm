@@ -13,6 +13,7 @@ cate(
   outcome_type = "binomial",
   loss = loss_weighted_sum(loss_squared_error),
   working_model = working_model_linear,
+  p = NULL,
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
   outer_folds = 5,
@@ -49,6 +50,13 @@ cate(
 working model to the target functional (e.g. \code{loss_squared_error}).}
 
 \item{working_model}{The marginal structural model working model (e.g. \code{working_model_linear}).}
+
+\item{p}{Integer giving the dimension of the working-model parameter
+\eqn{\beta} (the number of working-model coefficients). If \code{NULL}
+(the default), \code{p} is inferred from the number of columns in the
+design matrix produced by \code{formula}. When a working model whose
+coefficient dimension does not match the \code{formula}-based design, \code{p}
+should be supplied explicitly to match the working model's true number of coefficients.}
 
 \item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
 the propensity scores.}

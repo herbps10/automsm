@@ -3,6 +3,8 @@
 # These tests assert mathematical properties that must hold for
 # ANY correct implementation.
 
+source(test_path("test-helper-invariants.R"))
+
 
 # ----- Kernel invariants -----
 
@@ -66,7 +68,7 @@ test_that("ddL matches the closed form 2 sum_k x_k x_k' at unit weight", {
 })
 
 test_that("normalizing matrix inverts E_Q[Lddot] for any Q", {
-  n <- 9L; k <- 2L; p <- 3L
+  n <- 9L; K <- 2L; p <- 3L
   set.seed(4)
 
   Xa <- array(rnorm(n * K * p), dim = c(n, K, p))
@@ -78,8 +80,8 @@ test_that("normalizing matrix inverts E_Q[Lddot] for any Q", {
   check <- function(Qv) {
     Minv <- normalizing_matrix(Lm_fn, leaf(psi_a), leaf(b),
                                torch::torch_tensor(Xa), leaf(Qv), p)
-    M2 <- dobjective_dbeta(Lm_fn, leaf(psi_a), leaf(Qv),
-                           torch::torch_tensor(Xa), leaf(b), p)
+    M2 <- dobjective_dbeta(Lm_fn, leaf(psi_a), leaf(b),
+                           torch::torch_tensor(Xa), leaf(Qv), p)
 
     expect_equal(solve(as.matrix(Minv)), as.matrix(M2$detach()), tolerance = 1e-5)
   }
@@ -258,4 +260,23 @@ test_that("TMLE with ~1 agrees with the AIPW ATE", {
   aipw <- mean(nu$mu1 - nu$mu0) + mean(cate_delta(data, nu))
   expect_lt(abs(as.numeric(res$tmle$est) - aipw), 3 * as.numeric(res$tmle$se))
   expect_solves_eif(res$tmle$eif)
+})
+
+# ----- Design decisions -----
+test_that("working models with p != d are supported", {
+  working_model_power_law <- function(beta, X) {
+    beta[1] * torch::torch_pow(X[, , 1], beta[2])
+  }
+
+  data <- sim1_data(n = 150L)
+  data$f <- abs(data$X4) + 1
+  nu <- oracle_nuisance_cate(data)
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~-1 + f, working_model = working_model_power_law,
+              p = 2L, tmle = FALSE, bayes = FALSE, nuisance = nu)
+
+  expect_equal(res$p, 2L)
+  expect_equal(res$d, 1L)
+  expect_length(res$plugin$est, 2L)
+  expect_equal(dim(as.matrix(res$onestep$eif)), c(nrow(data), 2L))
 })

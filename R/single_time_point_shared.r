@@ -5,7 +5,7 @@
 #' @noRd
 validate_msm_arguments <- function(
     data, X, A, Y, formula,
-    outcome_type, loss, working_model,
+    outcome_type, loss, working_model, p,
     learners_trt, learners_outcome,
     outer_folds, inner_folds,
     tmle, tmle_maxiter, tmle_linear,
@@ -23,6 +23,7 @@ validate_msm_arguments <- function(
   checkmate::assert_choice(outcome_type, choices = c("continuous", "binomial"))
   checkmate::assert_function(loss)
   checkmate::assert_function(working_model)
+  checkmate::assert_count(p, positive = TRUE, null.ok = TRUE)
   checkmate::assert_character(learners_trt, min.len = 1, any.missing = FALSE)
   checkmate::assert_character(learners_outcome, min.len = 1, any.missing = FALSE)
   checkmate::assert_count(outer_folds, positive = TRUE)
@@ -45,20 +46,21 @@ validate_msm_arguments <- function(
 #'
 #' @noRd
 estimate_plugin_and_onestep <- function(
-  loss, working_model, design_matrix, psi, Q, Delta
+  Lm_fn, design_matrix, psi, Q, Delta, p
 ) {
   n <- dim(design_matrix)[1]
 
-  plugin <- B(Lm(loss, working_model), psi, design_matrix, Q)
+  plugin <- B(Lm_fn, psi, design_matrix, Q, p)
   beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
 
   onestep_est <- onestep(
-    Lm(loss, working_model),
+    Lm_fn,
     psi,
     beta,
     design_matrix,
     Q,
-    Delta
+    Delta,
+    p
   )
 
   draws <- 1e3
