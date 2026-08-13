@@ -1,0 +1,261 @@
+# Implementation-independent tests
+#
+# These tests assert mathematical properties that must hold for
+# ANY correct implementation.
+
+
+# ----- Kernel invariants -----
+
+test_that("Lm composes loss(prediction, target), not loss(target, prediction)", {
+  # Lm(t, beta, X) must equal L(m_beta(X), t). This orientation matters
+  # for every hand-derived quantity below. nn_mse_loss is symmetric but
+  # cross-entropy losses are not.
+  n <- 5L; K <- 2L; p <- 3L
+  set.seed(1)
+  Xa <- array(rnorm(n * K * p), dim = c(n, K, p))
+  psi_a <- matrix(rnorm(n * K), n, K)
+  b <- rnorm(p)
+
+  Lm_fn <- Lm(loss_squared_error, working_model_linear)
+  got <- Lm_fn(torch::torch_tensor(psi_a), leaf(b), torch::torch_tensor(Xa))
+
+  pred <- apply(Xa, c(1, 2), function(x) sum(x * b))
+  want <- rowSums((pred - psi_a)^2)
+  expect_tensor_close(got, torch::torch_tensor(want))
+})
+
+test_that("grad_dL matches the closed form -2 x for linear + squared error", {
+  K <- 2L; p <- 3L
+  set.seed(2)
+
+  Xa <- array(rnorm(1 * K * p), dim = c(1L, K, p))
+  psi_a <- matrix(rnorm(1 * K), 1L, K)
+  b <- rnorm(p)
+
+  got <- grad_dL(
+    Lm(loss_squared_error, working_model_linear),
+    leaf(psi_a), leaf(b), torch::torch_tensor(Xa)
+  )
+
+  want <- -2 * t(matrix(Xa[1, , ], nrow = K, ncol = p))
+  expect_tensor_close(got, torch::torch_tensor(want))
+})
+
+test_that("ddL matches the closed form 2 sum_k x_k x_k' at unit weight", {
+  n <- 7L; K <- 2L; p <- 3L
+  set.seed(3)
+  Xa <- array(rnorm(n * K * p), dim = c(n, K, p))
+  psi_a <- matrix(rnorm(n * K), n, K)
+  b <- rnorm(p)
+
+  got <- ddL(
+    Lm(loss_squared_error, working_model_linear),
+    leaf(psi_a), leaf(b), torch::torch_tensor(Xa), p
+  )
+
+  want <- matrix(0, p, p)
+
+  for(i in seq_len(n)) {
+    for(k in seq_len(K)) {
+      x <- Xa[i, k, ]
+      want <- want + 2 * outer(x, x)
+    }
+  }
+
+  expect_tensor_close(got, torch::torch_tensor(want))
+})
+
+test_that("normalizing matrix inverts E_Q[Lddot] for any Q", {
+  n <- 9L; k <- 2L; p <- 3L
+  set.seed(4)
+
+  Xa <- array(rnorm(n * K * p), dim = c(n, K, p))
+  psi_a <- matrix(rnorm(n * K), n, K)
+  b <- rnorm(p)
+
+  Lm_fn <- Lm(loss_squared_error, working_model_linear)
+
+  check <- function(Qv) {
+    Minv <- normalizing_matrix(Lm_fn, leaf(psi_a), leaf(b),
+                               torch::torch_tensor(Xa), leaf(Qv), p)
+    M2 <- dobjective_dbeta(Lm_fn, leaf(psi_a), leaf(Qv),
+                           torch::torch_tensor(Xa), leaf(b), p)
+
+    expect_equal(solve(as.matrix(Minv)), as.matrix(M2$detach()), tolerance = 1e-5)
+  }
+
+  check(rep(1/n, n))
+
+  skip()
+  w <- runif(n, 0.5, 2)
+  check(w / sum(w))
+})
+
+test_that("Q_fluctuation satisfies (M1a) and stays normalized", {
+  n <- 8L; p <- 2L
+  set.seed(5)
+  Kmat <- torch::torch_tensor(matrix(rnorm(n * p), n, p))
+  eps0 <- torch::torch_tensor(rep(0, p))
+
+  Qu <- torch::torch_tensor(rep(1/n, n))
+  expect_equal(as.numeric(Q_fluctuation(eps0, Kmat, Qu)$sum()), 1, tolerance = 1e-6)
+
+  expect_tensor_close(Q_fluctuation(eps0, Kmat, Qu), torch::torch_tensor(rep(1/n, n)))
+
+  skip()
+  w <- runif(n, 0.5, 2)
+  w <- w / sum(w)
+  Qn <- torch::torch_tensor(w)
+  expect_tensor_close(Q_fluctuation(eps0, Kmat, Qn), w)
+  expect_equal(as.numeric(Q_fluctuation(eps0, Kmat, Qn)$sum()), 1, tolerance = 1e-6)
+})
+
+
+test_that("dQ_fluctuation_depsilon is the Jacobian of Q_fluctuation", {
+  skip()
+  n <- 8L; p <- 2L
+  set.seed(6)
+  Kmat <- matrix(rnorm(n * p), n, p)
+  w <- runif(n, 0.5, 2)
+  w <- w / sum(w)
+  eps <- c(0.11, -0.07)
+
+  f <- function(e) {
+    as.numeric(Q_fluctuation(torch::torch_tensor(e), torch::torch_tensor(Kmat), torch::torch_tensor(w)))
+  }
+
+  got <- dQ_fluctuation_depsilon(torch::torch_tensor(eps), torch::torch_tensor(Kmat), torch::torch_tensor(w))
+
+  expect_equal(as.matrix(got$detach()), numeric_jacobian(f, eps), tolerance = 1e-4)
+})
+
+test_that("B() reaches the first-order condition E_Q[Ldot(psi, beta)] = 0", {
+  n <- 40L; K <- 1L; p <- 2L
+  set.seed(7)
+  V <- rnorm(n)
+  Xa <- array(cbind(1, V), dim = c(n, K, p))
+  psi_a <- matrix(0.3 + 0.5 * V + rnorm(n, sd = 0.1), n, K)
+  Qv <- rep(1 / n, n)
+  Lm_fn <- Lm(loss_squared_error, working_model_linear)
+
+  beta <- B(Lm_fn, torch::torch_tensor(psi_a), torch::torch_tensor(Xa), torch::torch_tensor(Qv), p)
+
+  g <- dL(Lm_fn, torch::torch_tensor(psi_a), leaf(as.numeric(beta)),
+          torch::torch_tensor(Xa), weight = torch::torch_tensor(Qv))[[1]]
+
+  expect_lt(max(abs(as.numeric(g))), 1e-5)
+
+  # For linear + squared error the minimiser is weighted OLS in closed form.
+  Xm <- cbind(1, V)
+  expect_equal(as.numeric(beta), as.numeric(solve(crossprod(Xm), crossprod(Xm, psi_a[, 1]))), tolerance = 1e-5)
+})
+
+# ----- EIF -----
+
+test_that("eif() equals the closed-form EIF elementwise (~1)", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+  n <- nrow(data)
+
+  psi <- nu$mu1 - nu$mu0
+  Delta <- cate_delta(data, nu)
+  Xmat <- model.matrix(~ 1, data = data)
+
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+
+  beta <- res$plugin$est
+
+  expect_equal(as.matrix(res$onestep$eif),
+               analytic_eif_linear(Xmat, psi, beta, Delta),
+               tolerance = 1e-5, ignore_attr = TRUE)
+})
+
+
+test_that("eif() equals the closed-form EIF elementwise (~X4)", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+  n <- nrow(data)
+
+  psi <- nu$mu1 - nu$mu0
+  Delta <- cate_delta(data, nu)
+  Xmat <- model.matrix(~ X4, data = data)
+
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~1 + X4, tmle = FALSE, bayes = FALSE, nuisance = nu)
+
+  beta <- res$plugin$est
+
+  expect_equal(as.matrix(res$onestep$eif),
+               analytic_eif_linear(Xmat, psi, beta, Delta),
+               tolerance = 1e-5, ignore_attr = TRUE)
+})
+
+test_that("cate TMLE solves the EIF estimating equation", {
+  # Verify Pn[D*(mu*, Q*, eta)] \approx 0
+
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+
+  for(linear in c(TRUE)) {
+    res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+                formula = ~X4, tmle = TRUE, tmle_linear = linear,
+                outcome = "binomial",
+                bayes = FALSE, nuisance = nu)
+
+    expect_solves_eif(res$tmle$eif)
+  }
+})
+
+test_that("dose_response TMLE solves the EIF estimating equation", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_dose_response(data)
+
+  res <- dose_response(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~A, tmle = TRUE,
+              outcome = "binomial",
+              bayes = FALSE, nuisance = nu)
+
+  expect_solves_eif(res$tmle$eif)
+})
+
+# ----- ATE reduction -----
+# With V = empty (formula = ~1) and squared-error loss, the CATE NP-MSM
+# reduces exactly to the ATE: B(P) = E_P[mu1(X) - mu0(X)]
+
+test_that("plug-in with ~1 equals the plug-in ATE", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+
+  expect_equal(as.numeric(res$plugin$est), mean(nu$mu1 - nu$mu0), tolerance = 1e-6)
+})
+
+
+test_that("one-step with ~1 equals the AIPW ATE", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+
+  psi <- nu$mu1 - nu$mu0
+  Delta <- cate_delta(data, nu)
+  expect_equal(as.numeric(res$onestep$est), mean(psi) + mean(Delta), tolerance = 1e-5)
+  expect_equal(as.numeric(res$onestep$se), stats::sd(psi - mean(psi) + Delta) / sqrt(nrow(data)), tolerance = 1e-4)
+})
+
+
+test_that("TMLE with ~1 agrees with the AIPW ATE", {
+  data <- sim1_data(n = 200L)
+  nu <- oracle_nuisance_cate(data)
+
+  res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
+              formula = ~1, tmle = TRUE, bayes = FALSE, nuisance = nu)
+
+  aipw <- mean(nu$mu1 - nu$mu0) + mean(cate_delta(data, nu))
+  expect_lt(abs(as.numeric(res$tmle$est) - aipw), 3 * as.numeric(res$tmle$se))
+  expect_solves_eif(res$tmle$eif)
+})

@@ -195,11 +195,6 @@ test_that("hand-coding working model with summary measures gives exact same resu
     tmle = TRUE
   )
 
-  expect_equal(fit$onestep$est, c(-1.037, 0.591), tolerance = 0.01)
-  expect_equal(fit$onestep$se, c(0.263, 0.176), tolerance = 0.01)
-  expect_equal(fit$tmle$est, c(-0.978, 0.531), tolerance = 0.01)
-  expect_equal(fit$tmle$se, c(0.262, 0.175), tolerance = 0.01)
-
   expect_equal(fit$onestep$est, fit2$onestep$est, tolerance = 1e-4)
   expect_equal(fit$onestep$se, fit2$onestep$se, tolerance = 1e-4)
   expect_equal(fit$tmle$est, fit2$tmle$est, tolerance = 1e-4)

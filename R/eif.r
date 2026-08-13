@@ -236,7 +236,7 @@ eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p = NULL) {
   # D1 = NablaLdot * Delta
   grad_blocks <- batched_NablaLdot(Lm, psi, beta, design_matrix, p, k)
 
-  D1 <- -torch::torch_cat(
+  D1 <- torch::torch_cat(
     purrr::map(grad_blocks, function(gb) {
       (gb * Delta)$sum(dim = 2)$reshape(c(n, 1))
     }),

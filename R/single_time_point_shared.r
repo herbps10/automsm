@@ -75,8 +75,8 @@ estimate_plugin_and_onestep <- function(
       se = as.numeric(onestep_est$se),
       lower = as.numeric(onestep_est$lower),
       upper = as.numeric(onestep_est$upper),
-      eif = as.numeric(onestep_est$eif),
-      joint_draws = as.numeric(onestep_joint)
+      eif = onestep_est$eif,
+      joint_draws = onestep_joint
     )
   )
 }
