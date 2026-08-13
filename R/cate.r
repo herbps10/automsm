@@ -304,7 +304,7 @@ cate <- function(
         break
       }
 
-      m <- max(as.numeric(epsilon_star))
+      m <- max(abs(as.numeric(epsilon_star)))
       #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
 
       if (tmle_linear == TRUE) {
