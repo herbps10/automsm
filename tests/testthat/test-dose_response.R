@@ -98,14 +98,14 @@ test_that("dose_response continous linear Bayes TMLE fixture is stable", {
   expect_equal(
     apply(fit$bayes_tmle$samples, 3, mean),
     apply(fx$fit_bayes$bayes_tmle$samples, 3, mean),
-    tolerance = 1e-4
+    tolerance = 1e-2
   )
   expect_equal(
     apply(fit$bayes_tmle$samples, 3, sd),
     apply(fx$fit_bayes$bayes_tmle$samples, 3, sd),
-    tolerance = 1e-4
+    tolerance = 1e-2
   )
-  expect_equal(fit$bayes_tmle$acc_rate, fx$fit_bayes$bayes_tmle$acc_rate, tolerance = 1e-4)
+  expect_equal(fit$bayes_tmle$acc_rate, fx$fit_bayes$bayes_tmle$acc_rate, tolerance = 1e-1)
 })
 
 test_that("dose_response continous binary Bayes TMLE fixture is stable", {

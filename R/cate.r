@@ -111,320 +111,39 @@ cate <- function(
     )
   }
 
-  Lm_fn <- Lm(loss, working_model)
+  dm <- build_design_tensor(formula, data, K = 1L, mutate = NULL, p = p)
+  pi <- nuisance$pi
 
-  psi <- torch::torch_tensor(nuisance$mu1 - nuisance$mu0, requires_grad = TRUE)$reshape(c(n, 1))
-
-  # Design matrix
-  mat <- model.matrix(formula, data = data)
-  terms <- colnames(mat)
-  design_matrix <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
-  d <- ncol(mat)
-  if(is.null(p)) p <- d
-
-  Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
-  H0 <- torch_tensor(-1 / (1 - nuisance$pi))
-  H1 <- torch_tensor(1 / nuisance$pi)
-  H <- torch_tensor(ifelse(data[[A]] == 1, 1 / nuisance$pi, -1 / (1 - nuisance$pi)))
-  Q <- torch::torch_tensor(rep(1 / n, n))
-
-  Delta <- (H * (Yt - torch::torch_tensor(nuisance$mu)))$reshape(c(n, 1))
-
-  base <- estimate_plugin_and_onestep(Lm_fn, design_matrix, psi, Q, Delta, p)
-
-  ##### TMLE
-
-  tmle_res <- NULL
-  bayes_tmle_res <- NULL
-
-  if (tmle == TRUE) {
-    # Calculate clever covariates for fluctuation model
-    calculate_clever <- function(Lm, H, H0, H1, psi, Q, beta, design_matrix, Minv) {
-      n <- dim(design_matrix)[1]
-      p <- dim(design_matrix)[3]
-
-      clever <- torch::torch_tensor(matrix(0, n, p))
-      clever0 <- torch::torch_tensor(matrix(0, n, p))
-      clever1 <- torch::torch_tensor(matrix(0, n, p))
-
-      for (i in 1:n) {
-        d <- Minv$matmul(grad_dL(Lm, psi[i, drop = FALSE], beta, design_matrix[i, , drop = FALSE]))
-        clever[i, ] <- torch::torch_reshape(H[i] * d, p)
-        clever0[i, ] <- torch::torch_reshape(H0[i] * d, p)
-        clever1[i, ] <- torch::torch_reshape(H1[i] * d, p)
-      }
-      list(
-        clever = clever,
-        clever0 = clever0,
-        clever1 = clever1
-      )
-    }
-
-    # TMLE fluctuation model
-    if (tmle_linear == TRUE) {
-      tmle_loss <- torch::nn_mse_loss(reduction = "sum")
-    } else {
-      tmle_loss <- torch::nn_bce_with_logits_loss(reduction = "sum")
-    }
-
-    tmle_fluctuation_model <- function(
-      epsilon,
-      mu,
-      mu0,
-      mu1,
-      clever,
-      clever0,
-      clever1,
-      K,
-      Q,
-      Y,
-      design_matrix,
-      Lm = NULL,
-      condvar = NA,
-      bayes = FALSE
-    ) {
-      # Fluctuate covariate distribution
-      #Q <- Q_fluctuation(epsilon, K, Q)
-
-      # Fluctuate outcome regression
-      if (tmle_linear == TRUE) {
-        mu <- mu[, 1] + clever$matmul(epsilon)
-        mu0 <- mu0[, 1] + clever0$matmul(epsilon)
-        mu1 <- mu1[, 1] + clever1$matmul(epsilon)
-        target <- tmle_loss(mu, Y)
-      } else {
-        mu_logit <- mu[, 1]$logit() + clever$matmul(epsilon)
-        mu0 <- torch::torch_sigmoid(mu0[,1]$logit() + clever0$matmul(epsilon))
-        mu1 <- torch::torch_sigmoid(mu1[,1]$logit() + clever1$matmul(epsilon))
-        target <- tmle_loss(mu_logit[, 1], Y)
-      }
-
-      # Combined loss function
-      target <- target - Q$log()$sum()
-
-      if (bayes == FALSE) {
-        return(target)
-      } else {
-        psi <- (mu1 - mu0)$reshape(c(n, 1))
-        beta <- B(
-          Lm_fn,
-          psi$detach()$clone(),
-          design_matrix,
-          Q$detach()$clone(),
-          p
-        )
-
-        if (tmle_linear == TRUE) {
-          target <- as.numeric(
-            -((mu - Y)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()
-          ) +
-            as.numeric(log(Q)$sum())
-        } else {
-          target <- -as.numeric(target)
-        }
-
-        # Prior
-        target <- target + bayes_prior(as.numeric(beta))
-        # Jacobian adjustment
-        jacobian <- dB_dpsi(Lm_fn, psi, beta, design_matrix, Q, p)$transpose(2, 3)
-        if (tmle_linear == TRUE) {
-          jacobian <- jacobian$matmul(clever1 - clever0)
-        } else {
-          jacobian <- jacobian$matmul(
-            clever1 *
-              mu1$reshape(c(n, 1)) *
-              (1 - mu1$reshape(c(n, 1))) -
-              clever0 * mu0$reshape(c(n, 1)) * (1 - mu0$reshape(c(n, 1)))
-          )
-        }
-
-        jacobian <- jacobian +
-          torch::torch_transpose(
-            dB_dQ(Lm_fn, psi, beta, design_matrix, Q, p),
-            1,
-            2
-          )$matmul(dQ_fluctuation_depsilon(epsilon, K, Q))
-        target <- target + log(abs(jacobian$det()))
-
-        ret <- list(log.density = as.numeric(target), beta = as.numeric(beta))
-
-        return(ret)
-      }
-    }
-
-    Q_star <- Q
-    mu_star <- torch::torch_tensor(nuisance$mu)$reshape(c(n, 1))
-    mu0_star <- torch::torch_tensor(nuisance$mu0)$reshape(c(n, 1))
-    mu1_star <- torch::torch_tensor(nuisance$mu1)$reshape(c(n, 1))
-    beta_star <- torch::torch_tensor(base$plugin$est, requires_grad = TRUE)
-    epsilon_star <- rep(0, p)
-
-    converged <- TRUE
-
-    for (tmle_iter in 1:tmle_maxiter) {
-      psi_star <- (mu1_star - mu0_star)$detach()$clone()
-      psi_star$requires_grad_(TRUE)
-
-      Minv <- normalizing_matrix(Lm_fn, psi_star, beta_star, design_matrix, Q_star, p)
-
-      K <- calculate_K(
-        Lm_fn,
-        psi_star,
-        beta_star,
-        design_matrix,
-        Minv
-      )
-
-      clever <- calculate_clever(
-        Lm_fn,
-        H,
-        H0,
-        H1,
-        psi_star,
-        Q_star,
-        beta_star,
-        design_matrix,
-        Minv
-      )
-
-      epsilon_star <- tmle_mle(p, function(epsilon) {
-        tmle_fluctuation_model(
-          epsilon, mu_star, mu0_star, mu1_star,
-          clever$clever, clever$clever0, clever$clever1,
-          K, Q_star, Yt, design_matrix
-        )
-      })
-
-      if (any(is.nan(as.numeric(epsilon_star)))) {
-        warning("TMLE failed to converge.")
-        converged <- FALSE
-        break
-      }
-
-      m <- max(abs(as.numeric(epsilon_star)))
-      #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {m}\n\n"))
-
-      if (tmle_linear == TRUE) {
-        mu_star[, 1]  <- mu_star[, 1]  + clever$clever$matmul(epsilon_star)
-        mu0_star[, 1] <- mu0_star[, 1] + clever$clever0$matmul(epsilon_star)
-        mu1_star[, 1] <- mu1_star[, 1] + clever$clever1$matmul(epsilon_star)
-      } else {
-        mu_star[, 1]  <- torch::torch_sigmoid(mu_star[, 1]$logit()  + clever$clever$matmul(epsilon_star))
-        mu0_star[, 1] <- torch::torch_sigmoid(mu0_star[, 1]$logit() + clever$clever0$matmul(epsilon_star))
-        mu1_star[, 1] <- torch::torch_sigmoid(mu1_star[, 1]$logit() + clever$clever1$matmul(epsilon_star))
-      }
-
-      Q_star <- Q_fluctuation(epsilon_star, K, Q_star)
-
-      beta_star <- B(
-        Lm_fn,
-        psi_star,
-        design_matrix,
-        Q_star,
-        p
-      )$detach()$clone()
-      beta_star$requires_grad_(TRUE)
-
-      if (abs(m) < 1e-3) {
-        break
-      }
-    }
-
-    tmle_est <- tmle_se <- tmle_lower <- tmle_upper <- rep(NA, p)
-    tmle_eif <- matrix(NA, ncol = p, nrow = n)
-    if (converged == TRUE) {
-      tmle_est <- B(Lm_fn, psi_star, design_matrix, Q_star, p)
-      tmle_eif <- eif(
-        Lm_fn,
-        psi_star,
-        tmle_est,
-        design_matrix,
-        Q_star,
-        (H * (Yt - mu_star[, 1]))$reshape(c(n, 1)),
-        p
-      )
-      tmle_se <- apply(tmle_eif, 2, sd) / sqrt(n)
-      tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
-      tmle_upper <- tmle_est + stats::qnorm(0.975) * tmle_se
-    }
-
-    tmle_res <- list(
-      est = as.numeric(tmle_est),
-      se = as.numeric(tmle_se),
-      lower = as.numeric(tmle_lower),
-      upper = as.numeric(tmle_upper),
-      eif = tmle_eif
+  problem <- new_msm_problem(
+    estimand = "cate", K = 1L, d = dm$d, p = dm$p, tau = 1L,
+    design_matrix = dm$design_matrix,
+    Q0 = torch::torch_tensor(rep(1 / n, n)),
+    Yt = data[[Y]],
+    Lm_fn = Lm(loss, working_model),
+    loss = loss, working_model = working_model,
+    formula = formula, terms = dm$terms,
+    outcome_type = outcome_type, nuisance = nuisance,
+    aux = list(
+      H = as_float_tensor(ifelse(data[[A]] == 1, 1 / pi, -1 / (1 - pi))),
+      H0 = as_float_tensor(-1 / (1 - pi)),
+      H1 = as_float_tensor(1 / pi)
     )
+  )
 
-    tmle_beta_samples <- NULL
-    tmle_acc_rate <- NULL
+  spec <- msm_spec_cate(tmle_linear = tmle_linear)
 
-    if (bayes == TRUE) {
-      tmle_beta_samples <- array(dim = c(bayes_chains, bayes_draws, p))
-      tmle_acc_rate <- 0
-
-      for (chain in 1:bayes_chains) {
-        cat("Chain: ", chain, "\n\n")
-
-        log_dens <- function(epsilon) {
-          tmle_fluctuation_model(
-            torch::torch_tensor(epsilon),
-            mu_star,
-            mu0_star,
-            mu1_star,
-            clever$clever,
-            clever$clever0,
-            clever$clever1,
-            K,
-            Q_star,
-            Yt,
-            design_matrix,
-            condvar = torch::torch_tensor(nuisance$condvar),
-            bayes = TRUE
-          )
-        }
-
-        mcmc <- adaptMCMC::MCMC(
-          log_dens,
-          n = bayes_draws,
-          init = as.numeric(epsilon_star),
-          adapt = TRUE,
-          acc.rate = 0.3,
-          scale = rep(1e-3, p)
-        )
-
-        tmle_beta_samples[chain, , ] <- matrix(
-          unlist(mcmc$extra.values),
-          ncol = p,
-          nrow = bayes_draws,
-          byrow = TRUE
-        )
-        tmle_acc_rate <- tmle_acc_rate + 1 / bayes_chains * mcmc$acceptance.rate
-      }
-    }
-
-    bayes_tmle_res <- list(
-      samples = tmle_beta_samples,
-      acc_rate = tmle_acc_rate
-    )
-  }
+  res <- fit_msm(
+    problem, spec,
+    tmle = tmle_control(tmle, tmle_maxiter, tmle_linear),
+    bayes = bayes_control(bayes, bayes_draws, bayes_chains, bayes_prior),
+    onestep = onestep_control(1e3, NULL)
+  )
 
   assemble_result(
-    "cate",
-    p,
-    d,
-    n,
-    formula,
-    working_model,
-    loss,
-    terms,
-    learners_trt,
-    learners_outcome,
-    nuisance,
-    plugin = list(est = as.numeric(base$plugin$est)),
-    onestep = base$onestep,
-    tmle_res,
-    bayes_tmle_res
+    "cate", problem$p, problem$d, problem$n, formula, working_model, loss, problem$terms,
+    learners_trt, learners_outcome, nuisance,
+    plugin = res$base$plugin, onestep = res$base$onestep,
+    tmle = res$tmle, bayes_tmle = res$bayes, tau = 1L
   )
 }
 

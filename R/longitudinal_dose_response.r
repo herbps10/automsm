@@ -147,52 +147,19 @@ longitudinal_dose_response <- function(
   epsilon = 1e-5,
   nuisance = NULL
 ) {
-  # ----- Argument checks -----
-  checkmate::assert_data_frame(data, min.rows = 1, min.cols = 1)
-
-  # Check As
-  checkmate::assert_character(As, min.len = 1, any.missing = TRUE, unique = TRUE)
-  checkmate::assert_subset(As, choices = names(data))
-
-  # Check Ls
-  checkmate::assert_list(Ls, len = length(As))
-  for(Lt in Ls) checkmate::assert_subset(Lt, choices = names(data))
-
-  # Check Y
-  checkmate::assert_string(Y)
-  checkmate::assert_choice(Y, choices = names(data))
-
-  checkmate::assert_formula(formula)
-
-  checkmate::assert_function(summary_measures, null.ok = TRUE)
-
-  checkmate::assert_choice(outcome_type, choices = c("continuous", "binomial"))
-
-  checkmate::assert_function(loss)
-  checkmate::assert_function(working_model)
-
-  checkmate::assert_character(learners_trt, min.len = 1, any.missing = FALSE)
-  checkmate::assert_character(learners_outcome, min.len = 1, any.missing = FALSE)
-
-  checkmate::assert_count(outer_folds, positive = TRUE)
-  checkmate::assert_count(inner_folds, positive = TRUE)
-
-  checkmate::assert_flag(tmle)
-  checkmate::assert_count(tmle_maxiter, positive = TRUE)
-  checkmate::assert_flag(tmle_linear)
-
-  checkmate::assert_number(epsilon, lower = 0, upper = 0.5, finite = TRUE)
-
-  checkmate::assert(
-    checkmate::check_null(nuisance),
-    checkmate::check_list(nuisance),
-    combine = "or"
+  validate_longitudinal_arguments(
+    data, Ls, As, Y, formula, summary_measures,
+    outcome_type, loss, working_model, p,
+    learners_trt, learners_outcome,
+    outer_folds, inner_folds,
+    tmle, tmle_maxiter, tmle_linear,
+    epsilon, nuisance
   )
 
   n <- nrow(data)
   tau <- length(As)
-  stopifnot(length(Ls) == length(As))
   k <- nrow(regimes)
+  stopifnot(identical(colnames(regimes), As))
 
   # Set up cross-train so the same training and valid folds
   # are used in propensity scores and ICE regressions
@@ -218,11 +185,6 @@ longitudinal_dose_response <- function(
     )
   }
 
-  Lm_fn <- Lm(loss, working_model)
-
-  # Build the design tensor
-  Yt <- torch::torch_tensor(data[[Y]], dtype = torch::torch_float())
-
   if(!is.null(summary_measures)) {
     # ---- Convenience path: build k x n x p tensor from formula + summaries ----
     sm <- as.data.frame(summary_measures(regimes))
@@ -231,248 +193,61 @@ longitudinal_dose_response <- function(
       stop("summary_measures returned column name(s) that collide with `data`: ", paste(intersect(colnames(sm), names(data)), collapse = ", "))
     }
 
-    build_design_block <- function(j) {
-      dataj <- data
-      for(col in colnames(sm)) dataj[[col]] <- sm[j, col]
-      stats::model.matrix(formula, data = dataj)
-    }
-
-    mat1 <- build_design_block(1)
-    terms <- colnames(mat1)
-    d <- ncol(mat1)
-    if(is.null(p)) p <- d
-
-    design_matrix <- torch::torch_zeros(c(n, k, p))
-    design_matrix[, 1, ] <- mat1
-    if(k > 1) for(j in 2:k) design_matrix[, j, ] <- build_design_block(j)
+    dm <- build_design_tensor(
+      formula, data, K = k,
+      mutate = function(d, j) {
+        for(col in colnames(sm)) d[[col]] <- sm[j, col]
+        d
+      },
+      p = p
+    )
   }
   else {
-    mat <- stats::model.matrix(formula, data = data)
-    terms <- colnames(mat)
-    d <- ncol(mat)
-    if(is.null(p)) p <- d
-
-    mat_tensor <- torch::torch_tensor(mat)$reshape(c(n, 1, ncol(mat)))
-
-    design_matrix <- mat_tensor$expand(c(n, k, ncol(mat)))
+    dm <- build_design_tensor(formula, data, K = k, mutate = NULL, p = p)
   }
 
-  ##### Plugin estimator
-  Q <- torch::torch_tensor(rep(1 / n, n))
+  pi_cumprod <- cumulative_propensity_scores(regimes, nuisance$pi)
+  W <- on_protocol_weights(regimes, as.matrix(data[, As, drop = FALSE]))
+  HA_node <- W / pi_cumprod
+  stopifnot(all(is.finite(HA_node)))
 
-  # psi is n x K: the ICE conditional means psi_P^{(\bar{a})}(L_1) per regime.
-  psi <- torch::torch_tensor(t(nuisance$mu[, , 1]), requires_grad = TRUE)
-
-  plugin <- B(Lm_fn, psi, design_matrix, Q, p)
-  beta <- torch::torch_tensor(plugin, requires_grad = TRUE)
-
-  # Delta: longitudinal ICE-based EIF term (n x K)
-  # Telescoping sum over t of (mu_{t+1} - mu_t) / g_{0:t}
-  pi_cumprod <- cumulative_propensity_scores(regimes, nuisance$pi) # k x n x tau
-
-  A_obs <- as.matrix(data[, As, drop = FALSE]) # k x n x tau
-  stopifnot(identical(colnames(regimes), As))
-
-  W <- on_protocol_weights(regimes, A_obs)
-
-  resid <- (nuisance$mu[, , 2:(tau + 1), drop = FALSE] - nuisance$mu[, , 1:tau, drop = FALSE]) / pi_cumprod
-  resid <- resid * W # apply on-protocol gating
-
-  Delta <- apply(resid, c(1, 2), sum)
-  Delta <- t(Delta)
-
-  stopifnot(all(is.finite(Delta)))
-
-  ##### One-step estimator
-  onestep_est <- onestep(
-    Lm_fn,
-    psi,
-    beta,
-    design_matrix,
-    Q,
-    torch::torch_tensor(Delta),
-    p = p
-  )
-
-  draws <- 1e3
-  onestep_joint <- mvtnorm::rmvnorm(
-    draws,
-    mean = as.numeric(onestep_est$est),
-    sigma = var(as.matrix(onestep_est$eif)) / n
-  )
-
-  if (tmle == TRUE) {
-    # Inverse-weight clever-covariate multipliers per regime, node:
-    #   HA_node[j, i, t] = I(on-protocol through t) / g_{0:t}
-    HA_node <- W / pi_cumprod
-    stopifnot(all(is.finite(HA_node)))
-    HA_node <- torch::torch_tensor(HA_node)
-
-    # Clever covariate at a single ICE node k, for the current beta/psi
-    calculate_clever_node <- function(Lm, HA_node_k, psi, Q, beta, design_matrix, Minv) {
-      n <- dim(design_matrix)[1]
-      k <- dim(design_matrix)[2]
-
-      NablaLdot <- torch::torch_stack(batched_NablaLdot(Lm, psi, beta, design_matrix, p, k), dim = 1)
-      d_all <- torch::torch_matmul(Minv, NablaLdot$permute(c(2, 1, 3)))
-      d_all_t <- d_all$transpose(2, 3)
-      HA_perm <- HA_node_k$t()$reshape(c(n, k, 1))
-      cleverA <- (d_all_t * HA_perm)$permute(c(2, 1, 3))
-      cleverA
-    }
-
-    if (tmle_linear == TRUE) {
-      tmle_loss <- nn_mse_loss(reduction = "sum")
-    } else {
-      tmle_loss <- nn_bce_with_logits_loss(reduction = "sum")
-    }
-
-    # Fluctuation object for a SINGLE node: regress the forward ICE fit
-    # (mu_next, per regime) on the node's clever covariate, offset by
-    # current fit.
-    node_fluctuation_model <- function(epsilon, mu_node, mu_next, cleverA_node, clever_K, Q) {
-      target <- 0
-      for(j in 1:k) {
-        if (tmle_linear == TRUE) {
-          pred_j <- mu_node[, j] + cleverA_node[j, , ]$matmul(epsilon)
-        } else {
-          pred_j <- mu_node[, j]$logit() + cleverA_node[j, , ]$matmul(epsilon)
-        }
-
-        target <- target + tmle_loss(pred_j, mu_next[, j])
-      }
-
-      Qf <- Q_fluctuation(epsilon, clever_K, Q)
-      target - log(Q)$sum()
-    }
-
-    # Initialize TMLE
-    Q_star <- Q
-    mu_star_nodes <- vector("list", tau + 1)
-    for(t in 1:(tau + 1)) {
-      mu_star_nodes[[t]] <- torch::torch_tensor(t(nuisance$mu[, , t])) # n x k
-    }
-    mu_a_star <- mu_star_nodes[[1]]$detach()$clone() # psi = ICE at node 1
-    mu_a_star$requires_grad_(TRUE)
-    beta_star <- beta
-
-    for (tmle_iter in 1:tmle_maxiter) {
-      max_eps <- 0
-
-      for(t in tau:1) {
-        mu_a_star <- mu_a_star$detach()$clone()
-        mu_a_star$requires_grad_(TRUE)
-
-        Minv <- normalizing_matrix(Lm_fn, mu_a_star, beta_star, design_matrix, Q_star, p)
-        clever_K <- calculate_K(Lm_fn, mu_a_star, beta_star, design_matrix, Minv)
-
-        cleverA_t <- calculate_clever_node(
-          Lm_fn, HA_node[, , t], mu_a_star, Q_star, beta_star, design_matrix, Minv
-        )
-
-        epsilon_t <- tmle_mle(p, function(epsilon) {
-          node_fluctuation_model(
-            epsilon, mu_star_nodes[[t]], mu_star_nodes[[t + 1]],
-            cleverA_t, clever_K, Q_star
-          )
-        })
-
-        max_eps <- max(max_eps, max(abs(as.numeric(epsilon_t))))
-        #cat(glue::glue("TMLE iteration: {tmle_iter}, max(epsilon): {max_eps}\n\n"))
-
-        # Update the node-t fit for each regime
-        upd <- mu_star_nodes[[t]]$detach()$clone()
-        for(j in 1:k) {
-          if(tmle_linear == TRUE) {
-            upd[, j] <- mu_star_nodes[[t]][, j] + cleverA_t[j, , ]$matmul(epsilon_t)
-          }
-          else {
-            upd[, j] <- torch::torch_sigmoid(
-              mu_star_nodes[[t]][, j]$logit() + cleverA_t[j, , ]$matmul(epsilon_t)
-            )
-          }
-        }
-        mu_star_nodes[[t]] <- upd$detach()
-
-        # Fluctuate Q only once per outer iteration (e.g., at the final node t = 1)
-        if(t == 1) {
-          Q_star <- Q_fluctuation(epsilon_t, clever_K, Q_star)
-        }
-      }
-
-      # After the backward sweep, node 1 holds the updated psi = ICE at L1
-      mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
-      mu_a_star$requires_grad_(TRUE)
-      beta_star <- B(Lm_fn, mu_a_star$detach(), design_matrix, Q_star$detach(), p)$detach()$clone()
-      beta_star$requires_grad_(TRUE)
-
-      if (abs(max_eps) < 1e-2) break
-    }
-
-    # Final TMLE plug-in and EIF
-    mu_a_star <- mu_star_nodes[[1]]$detach()$clone()
-    mu_a_star$requires_grad_(TRUE)
-
-    tmle_est <- B(Lm_fn, mu_a_star$detach(), design_matrix, Q_star$detach(), p)
-
-    # Delta reuses the telescoping ICE residual, now computed from the updated (fluctuated) nodes
-    resid_star <- array(0, dim = c(k, n, tau))
-    for(t in 1:tau) {
-      resid_star[, , t] <- t(as.matrix(mu_star_nodes[[t + 1]] - mu_star_nodes[[t]]))
-    }
-    resid_star <- resid_star / pi_cumprod * W
-    Delta_star <- t(apply(resid_star, c(1, 2), sum))
-
-    tmle_eif <- eif(
-      Lm_fn, mu_a_star, tmle_est, design_matrix, Q_star$detach(), torch::torch_tensor(Delta_star), p
-    )
-
-    tmle_se <- apply(tmle_eif, 2, stats::sd) / sqrt(n)
-    tmle_lower <- tmle_est + stats::qnorm(0.025) * tmle_se
-    tmle_upper <- tmle_est + stats::qnorm(0.975) * tmle_se
-  }
-
-  res <- list(
-    estimand = "longitudinal_dose_response",
-    p = p,
-    d = d,
-    n = n,
-    tau = tau,
-    formula = formula,
-    working_model = working_model,
-    loss = loss,
-    terms = terms,
-    learners_trt = learners_trt,
-    learners_outcome = learners_outcome,
-    nuisance = nuisance,
-    regimes = regimes,
-    plugin = list(
-      est = as.numeric(plugin)
-    ),
-    onestep = list(
-      est = as.numeric(onestep_est$est),
-      se = as.numeric(onestep_est$se),
-      lower = as.numeric(onestep_est$lower),
-      upper = as.numeric(onestep_est$upper),
-      eif = onestep_est$eif,
-      psi = as.numeric(psi),
-      joint_draws = onestep_joint
+  problem <- new_msm_problem(
+    estimand = "longitudinal_dose_response", K = k, d = dm$d, p = dm$p, tau = tau,
+    design_matrix = dm$design_matrix,
+    Q0 = torch::torch_tensor(rep(1 / n, n)),
+    Yt = data[[Y]],
+    Lm_fn = Lm(loss, working_model),
+    loss = loss, working_model = working_model,
+    formula = formula, terms = dm$terms,
+    outcome_type = outcome_type, nuisance = nuisance,
+    aux = list(
+      HA_node = torch::torch_tensor(HA_node),
+      pi_cumprod = pi_cumprod,
+      W = W,
+      regimes = regimes,
+      Ls = Ls,
+      As = As,
+      cv = cv
     )
   )
 
-  if (tmle == TRUE) {
-    res$tmle <- list(
-      est = as.numeric(tmle_est),
-      se = as.numeric(tmle_se),
-      lower = as.numeric(tmle_lower),
-      upper = as.numeric(tmle_upper),
-      eif = tmle_eif
-    )
-  }
+  spec <- msm_spec_longitudinal_dose_response(tmle_linear = tmle_linear)
 
-  class(res) <- "automsm"
+  res <- fit_msm(
+    problem, spec,
+    tmle = tmle_control(tmle, tmle_maxiter, tmle_linear),
+    bayes = bayes_control(enabled = FALSE),
+    onestep = onestep_control(1e3, 1)
+  )
 
-  res
+  assemble_result(
+    "longitudinal_dose_response", problem$p, problem$d, problem$n, formula, working_model,
+    loss, problem$terms, learners_trt, learners_outcome, nuisance,
+    plugin = res$base$plugin, onestep = res$base$onestep,
+    tmle = res$tmle,
+    bayes_tmle = NULL,
+    tau = tau, regimes = regimes
+  )
 }
 
 #' Helper for retrieving all columns up to just before $A_t$
