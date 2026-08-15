@@ -22,8 +22,6 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
     supports_bayes = TRUE,
     tmle_loss = tmle_loss,
 
-    sweep_criterion = function(eps_list) max(abs(as.numeric(eps_list[[1]]))),
-
     init_state = function(problem) {
       n <- problem$n
       list(
@@ -39,47 +37,31 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
 
     steps = function(problem) list(list(id = 1L, fluctuate_Q = TRUE)),
 
-    psi_from_state = function(problem, state, detach = TRUE) {
+    psi_from_state = function(problem, state) {
       psi <- state$mu$a1 - state$mu$a0
-      if(detach) {
-        psi <- psi$detach()$clone()
-        psi$requires_grad_(TRUE)
-      }
+      psi <- psi$detach()$clone()
+      psi$requires_grad_(TRUE)
       psi
     },
 
     make_clever = function(problem, step, state, psi, Minv) {
       n <- problem$n
-      p <- problem$p
-      H <- problem$aux$H
-      H0 <- problem$aux$H0
-      H1 <- problem$aux$H1
-      cl <- torch::torch_zeros(c(n, p))
-      cl0 <- torch::torch_zeros(c(n, p))
-      cl1 <- torch::torch_zeros(c(n, p))
-
-      for(i in 1:n) {
-        d <- Minv$matmul(grad_dL(
-          problem$Lm_fn, psi[i, drop = FALSE], state$beta,
-          problem$design_matrix[i, , drop = FALSE]
-        ))
-
-        cl[i, ] <- torch::torch_reshape(H[i] * d, p)
-        cl0[i, ] <- torch::torch_reshape(H0[i] * d, p)
-        cl1[i, ] <- torch::torch_reshape(H1[i] * d, p)
-      }
-      list(obs = cl, a0 = cl0, a1 = cl1)
+      d <- clever_directions(problem, psi, state$beta, Minv)$reshape(c(n, problem$p))
+      list(
+        obs = d * problem$aux$H$reshape(c(n, 1)),
+        a0 = d * problem$aux$H0$reshape(c(n, 1)),
+        a1 = d * problem$aux$H1$reshape(c(n, 1))
+      )
     },
 
-    fluctuation_objective = function(epsilon, problem, step, state, clever, K_Q) {
+    mu_loss = function(epsilon, problem, step, state, clever) {
       if(tmle_linear) {
         pred <- state$mu$obs[, 1] + clever$obs$matmul(epsilon)
       }
       else {
         pred <- state$mu$obs[, 1]$logit() + clever$obs$matmul(epsilon)
       }
-      target <- tmle_loss(pred, problem$Yt)
-      target - state$Q$log()$sum()
+      tmle_loss(pred, problem$Yt)
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
@@ -124,6 +106,27 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
         lg <- state$mu$obs[, ]$logit() + clever$obs$matmul(epsilon)
         -as.numeric(tmle_loss(lg, problem$Yt)) + as.numeric(Q_eps$log()$sum())
       }
+    },
+
+    nuisance_contract = function(problem, bayes_enabled) {
+      n <- problem$n
+      b <- outcome_bounds(problem)
+
+      list(
+        fields = list(
+          nuisance_field("pi", n, lower = 0, upper = 1),
+          nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
+          nuisance_field("mu0", n, lower = b$lo, upper = b$hi, severity = "warning"),
+          nuisance_field("mu1", n, lower = b$lo, upper = b$hi, severity = "warning"),
+          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear)
+        ),
+        checks = list(
+          function(nu, problem) {
+            expect <- ifelse(problem$aux$A_obs == 1, nu$mu1, nu$mu0)
+            if(max(abs(nu$mu - expect)) < 1e-6) TRUE else "nuisance$mu must equal mu1 where A == 1 and mu0 where A == 0."
+          }
+        )
+      )
     }
   )
 }

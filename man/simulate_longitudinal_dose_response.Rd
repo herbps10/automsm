@@ -26,6 +26,8 @@ the outcome model (logit scale).}
 
 \item{binary}{whether to simulate binary (default) or continuous outcomes.}
 
+\item{sigma}{Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).}
+
 \item{seed}{random number seed (optional).}
 }
 \value{

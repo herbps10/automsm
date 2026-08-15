@@ -10,31 +10,31 @@
 AUTOMSM_FIELDS <- c(
   "estimand", "p", "d", "n", "tau",
   "formula", "working_model", "loss", "terms",
-  "learners_trt", "learners_outcome",
-  "nuisance", "regimes",
+  "nuisance_control",
+  "nuisance_estimates",
+  "regimes",
   "plugin", "onestep", "tmle", "bayes_tmle"
 )
 
 #' @noRd
-new_automsm <- function(problem, base, tmle = NULL, bayes_tmle = NULL, learners_trt, learners_outcome) {
+new_automsm <- function(problem, base, tmle = NULL, bayes_tmle = NULL, nuisance) {
   res <- list(
-    estimand         = problem$estimand,
-    p                = problem$p,
-    d                = problem$d,
-    n                = problem$n,
-    tau              = problem$tau,
-    formula          = problem$formula,
-    working_model    = problem$working_model,
-    loss             = problem$loss,
-    terms            = problem$terms,
-    learners_trt     = learners_trt,
-    learners_outcome = learners_outcome,
-    nuisance         = problem$nuisance,
-    regimes          = problem$aux$regimes,
-    plugin           = base$plugin,
-    onestep          = base$onestep,
-    tmle             = tmle,
-    bayes_tmle       = bayes_tmle
+    estimand           = problem$estimand,
+    p                  = problem$p,
+    d                  = problem$d,
+    n                  = problem$n,
+    tau                = problem$tau,
+    formula            = problem$formula,
+    working_model      = problem$working_model,
+    loss               = problem$loss,
+    terms              = problem$terms,
+    nuisance_control   = nuisance,
+    nuisance_estimates = problem$nuisance,
+    regimes            = problem$aux$regimes,
+    plugin             = base$plugin,
+    onestep            = base$onestep,
+    tmle               = tmle,
+    bayes_tmle         = bayes_tmle
   )
   stopifnot(identical(names(res), AUTOMSM_FIELDS))
   structure(res, class = "automsm")

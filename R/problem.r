@@ -40,25 +40,39 @@ validate_working_model_dim <- function(working_model, design_matrix, p) {
 
   if(!identical(dim(out), dim(design_matrix)[1:2])) {
     stop("working_model() returned shape(", paste(dim(out), collapse = ", "),
-         "); expected (", paste0(dim(design_matrix[1:2], collapse = ", "), ")."), call. = FALSE)
+         "); expected (", paste0(dim(design_matrix[1:2]), collapse = ", "), ").", call. = FALSE)
   }
   TRUE
+}
+
+probe_batched_beta <- function(working_model, design_matrix, p) {
+  m <- min(dim(design_matrix[1]), 8L)
+  Xs <- design_matrix[1:m, , , drop = FALSE]
+  b <- torch::torch_randn(p)
+  one <- try(working_model(b, Xs), silent = TRUE)
+  if(inherits(one, "try-error")) return(FALSE)
+  Bb <- b$unsqueeze(1)$expand(c(m, p))$clone()
+  many <- try(working_model(Bb, Xs), silent = TRUE)
+  if(inherits(many, "try-error") || !identical(dim(many), dim(one))) return(FALSE)
+  isTRUE(as.numeric((many - one)$abs()$max()) < 1e-5)
 }
 
 new_msm_problem <- function(estimand, K, d, p, tau = 1L,
                             design_matrix, Q0, Yt, Lm_fn,
                             loss, working_model, formula, terms,
-                            outcome_type, nuisance, aux = list()) {
+                            outcome_type, nuisance_estimates, aux = list()) {
   n <- dim(design_matrix)[1]
   stopifnot(identical(dim(design_matrix), c(n, as.integer(K), as.integer(d))))
   validate_working_model_dim(working_model, design_matrix, p)
+  batched_beta <- probe_batched_beta(working_model, design_matrix, p)
   structure(
     list(estimand = estimand, n = n, K = as.integer(K), d = as.integer(d),
          p = as.integer(p), tau = as.integer(tau),
          design_matrix = design_matrix, Q0 = Q0, Yt = as_float_tensor(Yt),
          Lm_fn = Lm_fn, loss = loss, working_model = working_model,
          formula = formula, terms = terms, outcome_type = outcome_type,
-         nuisance = nuisance, aux = aux),
+         batched_beta = batched_beta,
+         nuisance_estimates = nuisance_estimates, aux = aux),
     class = "msm_problem"
   )
 }

@@ -24,7 +24,7 @@ dL <- function(Lm, t, beta, X, weight = 1) {
 #' @noRd
 ddL <- function(Lm, t, beta, X, p, weight = 1) {
   beta$grad <- NULL
-  l <- dL(Lm, t, beta, X, weight = 1)[[1]]
+  l <- dL(Lm, t, beta, X, weight = weight)[[1]]
   r <- purrr::map(1:length(l), function(index) {
     torch::torch_reshape(
       torch::autograd_grad(
@@ -135,15 +135,21 @@ dB_dQ <- function(Lm, psi, beta, design_matrix, Q, p) {
 #' @noRd
 normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p) {
   n <- dim(design_matrix)[1]
-  M <- ddL(Lm, psi, beta, design_matrix, p, Q) / n
+  M <- ddL(Lm, psi, beta, design_matrix, p, Q)
   torch::torch_tensor(M$inverse())
 }
 
 #' Per-observation gradient of the loss wrt beta (the \dot{L}_m / D_2 term)
 #' Returns an n x p tensor whose i-th row is dL_m/dbeta for observation i
 #' @noRd
-batched_dL_dbeta <- function(Lm, psi, beta, design_matrix, p) {
+batched_dL_dbeta <- function(Lm, psi, beta, design_matrix, p, batched = TRUE) {
   n <- dim(design_matrix)[1]
+
+  if(batched) {
+    B <- beta$detach()$unsqueeze(1)$expand(c(n, p))$clone()$requires_grad_(TRUE)
+    return(torch::autograd_grad(Lm(psi, B, design_matrix)$sum(), B, retain_graph = TRUE)[[1]])
+  }
+
   Lm_vec <- Lm(psi, beta, design_matrix)
   torch::torch_cat(
     purrr::map(1:n, function(i) {
@@ -187,11 +193,11 @@ batched_NablaLdot <- function(Lm, psi, beta, design_matrix, p, k) {
 }
 
 #' @noRd
-eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p) {
+eif <- function(Lm, psi, beta, design_matrix, Q, Delta, p, batched_beta) {
   n <- dim(design_matrix)[1]
   k <- dim(design_matrix)[2]
   Minv <- normalizing_matrix(Lm, psi, beta, design_matrix, Q, p)
-  D2 <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p)
+  D2 <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p, batched_beta)
 
   grad_blocks <- batched_NablaLdot(Lm, psi, beta, design_matrix, p, k)
   D1 <- torch::torch_cat(

@@ -6,7 +6,7 @@
 #' @noRd
 tmle_mle <- function(p, obj_fn) {
   epsilon <- torch::torch_tensor(rep(0, p), requires_grad = TRUE)
-  optimizer <- torch::optim_lbfgs(epsilon)
+  optimizer <- torch::optim_lbfgs(epsilon, max_iter = 20)
 
   for (iter in 1:2) {
     optimizer$step(function() {
@@ -22,21 +22,21 @@ tmle_mle <- function(p, obj_fn) {
 
 #' Clever covariate for marginal distribution of covariates
 #' @noRd
-calculate_K <- function(Lm, psi, beta, design_matrix, Minv) {
+calculate_K <- function(Lm, psi, beta, design_matrix, Minv, batched_beta) {
   p <- dim(Minv)[1]
-  Kdot <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p)
+  Kdot <- batched_dL_dbeta(Lm, psi, beta, design_matrix, p, batched_beta)
   Kdot$matmul(Minv)
 }
 
 Q_fluctuation <- function(epsilon, K, Q) {
-  Qn <- exp(K$matmul(epsilon) * Q)$sum()
-  exp(K$matmul(epsilon) * Q) / Qn
+  u <- K$matmul(epsilon)
+  u <- u - u$max() # stabilizes estimation
+  w <- torch::torch_exp(u)$mul(Q)
+  w$divide(w$sum())
 }
 
 dQ_fluctuation_depsilon <- function(epsilon, K, Q) {
   n <- dim(Q)
-  Qn <- exp(K$matmul(epsilon) * Q)$sum()
-  Q_fluctuation(epsilon, K, Q)$reshape(c(n, 1))$mul(
-    K - Q$reshape(c(n, 1))$mul(K)$mul(exp(K * epsilon)) / Qn
-  )
+  Qt <- Q_fluctuation(epsilon, K, Q)
+  Qt$reshape(c(n, 1))$mul(K - Qt$reshape(c(1, n))$matmul(K))
 }

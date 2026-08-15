@@ -4,6 +4,7 @@
 # ANY correct implementation.
 
 source(test_path("test-helper-invariants.R"))
+source(test_path("test-internals.R"))
 
 
 # ----- Kernel invariants -----
@@ -88,7 +89,6 @@ test_that("normalizing matrix inverts E_Q[Lddot] for any Q", {
 
   check(rep(1/n, n))
 
-  skip()
   w <- runif(n, 0.5, 2)
   check(w / sum(w))
 })
@@ -104,17 +104,15 @@ test_that("Q_fluctuation satisfies (M1a) and stays normalized", {
 
   expect_tensor_close(Q_fluctuation(eps0, Kmat, Qu), torch::torch_tensor(rep(1/n, n)))
 
-  skip()
   w <- runif(n, 0.5, 2)
   w <- w / sum(w)
   Qn <- torch::torch_tensor(w)
-  expect_tensor_close(Q_fluctuation(eps0, Kmat, Qn), w)
+  expect_tensor_close(Q_fluctuation(eps0, Kmat, Qn), torch::torch_tensor(w))
   expect_equal(as.numeric(Q_fluctuation(eps0, Kmat, Qn)$sum()), 1, tolerance = 1e-6)
 })
 
 
 test_that("dQ_fluctuation_depsilon is the Jacobian of Q_fluctuation", {
-  skip()
   n <- 8L; p <- 2L
   set.seed(6)
   Kmat <- matrix(rnorm(n * p), n, p)
@@ -122,13 +120,34 @@ test_that("dQ_fluctuation_depsilon is the Jacobian of Q_fluctuation", {
   w <- w / sum(w)
   eps <- c(0.11, -0.07)
 
-  f <- function(e) {
-    as.numeric(Q_fluctuation(torch::torch_tensor(e), torch::torch_tensor(Kmat), torch::torch_tensor(w)))
+  Kt <- torch::torch_tensor(Kmat, dtype = torch::torch_double())
+  Qt <- torch::torch_tensor(w, dtype = torch::torch_double())
+
+  got <- as.matrix(
+    dQ_fluctuation_depsilon(torch::torch_tensor(eps, dtype = torch::torch_double()), Kt, Qt)$detach()
+  )
+
+  expect_lt(max(abs(colSums(got))), 1e-12)
+
+  expect_equal(
+    got,
+    autograd_jacobian(function(e) Q_fluctuation(e, Kt, Qt), eps, dtype = torch::torch_double()),
+    tolerance = 1e-10
+  )
+
+  f_dbl <- function(e) {
+    as.numeric(Q_fluctuation(torch::torch_tensor(e, dtype = torch::torch_double()), Kt, Qt))
   }
 
-  got <- dQ_fluctuation_depsilon(torch::torch_tensor(eps), torch::torch_tensor(Kmat), torch::torch_tensor(w))
+  expect_equal(got, numeric_jacobian(f_dbl, eps), tolerance = 1e-6)
 
-  expect_equal(as.matrix(got$detach()), numeric_jacobian(f, eps), tolerance = 1e-4)
+  # Check the float32 path is consistent at float32 tolerance
+  Kf <- torch::torch_tensor(Kmat)
+  Qf <- torch::torch_tensor(w)
+  expect_equal(
+    as.matrix(dQ_fluctuation_depsilon(torch::torch_tensor(eps), Kf, Qf)$detach()),
+    got, tolerance = 1e-5, ignore_attr = TRUE
+  )
 })
 
 test_that("B() reaches the first-order condition E_Q[Ldot(psi, beta)] = 0", {
@@ -152,6 +171,50 @@ test_that("B() reaches the first-order condition E_Q[Ldot(psi, beta)] = 0", {
   expect_equal(as.numeric(beta), as.numeric(solve(crossprod(Xm), crossprod(Xm, psi_a[, 1]))), tolerance = 1e-5)
 })
 
+test_that("normalizing matrix input is a symmetric Hessian", {
+  # ddL returns E_Q[Lddot], a Hessian, and therefore symmetric.
+  n <- 40L; K <- 1L; p <- 2L
+  set.seed(7)
+  V <- rnorm(n)
+  Xa <- array(cbind(1, V), dim = c(n, K, p))
+  psi_a <- matrix(0.3 + 0.5 * V + rnorm(n, sd = 0.1), n, K)
+  b <- rnorm(p)
+  Qv <- rep(1 / n, n)
+
+  M <- ddL(Lm(loss_squared_error, working_model_linear),
+           leaf(psi_a), leaf(b), torch::torch_tensor(Xa), p, torch::torch_tensor(Qv))
+  Mm <- as.matrix(M$detach())
+  expect_lt(max(abs(Mm - t(Mm))), 1e-5 * max(abs(Mm)))
+})
+
+test_that("clever directions are consistent with dB_dpsi", {
+  data <- sim1_data(n = 100L)
+  nu <- oracle_nuisance_dose_response(data)
+
+  it <- dose_response_internals(data, nu, formula = ~A, tmle = FALSE)
+  problem <- it$problem
+  n <- problem$n
+  p <- problem$p
+
+  check <- function(Qv, label) {
+    state <- it$state0
+    state$Q <- torch::torch_tensor(Qv)
+    psi <- it$spec$psi_from_state(problem, state)
+    Minv <- normalizing_matrix(problem$Lm_fn, psi, state$beta, problem$design_matrix, state$Q, p)
+    J <- dB_dpsi(problem$Lm_fn, psi, state$beta, problem$design_matrix, state$Q, p)
+    d <- clever_directions(problem, psi, state$beta, Minv)
+    expect_equal(
+      as.array(J$permute(c(2, 1, 3))$detach()),
+      as.array((-d * state$Q$reshape(c(n, 1, 1)))$detach()),
+      tolerance = 1e-5, info = label
+    )
+  }
+
+  check(rep(1 / n, n), "uniform Q")
+  w <- runif(n, 0.5, 2)
+  check(w / sum(w), "non-uniform Q")
+})
+
 # ----- EIF -----
 
 test_that("eif() equals the closed-form EIF elementwise (~1)", {
@@ -164,7 +227,7 @@ test_that("eif() equals the closed-form EIF elementwise (~1)", {
   Xmat <- model.matrix(~ 1, data = data)
 
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance_estimates = nu)
 
   beta <- res$plugin$est
 
@@ -184,7 +247,7 @@ test_that("eif() equals the closed-form EIF elementwise (~X4)", {
   Xmat <- model.matrix(~ X4, data = data)
 
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-              formula = ~1 + X4, tmle = FALSE, bayes = FALSE, nuisance = nu)
+              formula = ~1 + X4, tmle = FALSE, bayes = FALSE, nuisance_estimates = nu)
 
   beta <- res$plugin$est
 
@@ -199,11 +262,11 @@ test_that("cate TMLE solves the EIF estimating equation", {
   data <- sim1_data(n = 200L)
   nu <- oracle_nuisance_cate(data)
 
-  for(linear in c(TRUE)) {
+  for(linear in c(TRUE, FALSE)) {
     res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-                formula = ~X4, tmle = TRUE, tmle_linear = linear,
+                formula = ~X4, tmle = tmle_control(linear = linear),
                 outcome = "binomial",
-                bayes = FALSE, nuisance = nu)
+                nuisance_estimates = nu)
 
     expect_solves_eif(res$tmle$eif)
   }
@@ -216,7 +279,7 @@ test_that("dose_response TMLE solves the EIF estimating equation", {
   res <- dose_response(data, X = paste0("X", 1:4), A = "A", Y = "Y",
               formula = ~A, tmle = TRUE,
               outcome = "binomial",
-              bayes = FALSE, nuisance = nu)
+              bayes = FALSE, nuisance_estimates = nu)
 
   expect_solves_eif(res$tmle$eif)
 })
@@ -230,7 +293,7 @@ test_that("plug-in with ~1 equals the plug-in ATE", {
   nu <- oracle_nuisance_cate(data)
 
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance_estimates = nu)
 
   expect_equal(as.numeric(res$plugin$est), mean(nu$mu1 - nu$mu0), tolerance = 1e-6)
 })
@@ -241,7 +304,7 @@ test_that("one-step with ~1 equals the AIPW ATE", {
   nu <- oracle_nuisance_cate(data)
 
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance = nu)
+              formula = ~1, tmle = FALSE, bayes = FALSE, nuisance_estimates = nu)
 
   psi <- nu$mu1 - nu$mu0
   Delta <- cate_delta(data, nu)
@@ -255,7 +318,7 @@ test_that("TMLE with ~1 agrees with the AIPW ATE", {
   nu <- oracle_nuisance_cate(data)
 
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-              formula = ~1, tmle = TRUE, bayes = FALSE, nuisance = nu)
+              formula = ~1, tmle = TRUE, bayes = FALSE, nuisance_estimates = nu)
 
   aipw <- mean(nu$mu1 - nu$mu0) + mean(cate_delta(data, nu))
   expect_lt(abs(as.numeric(res$tmle$est) - aipw), 3 * as.numeric(res$tmle$se))
@@ -273,7 +336,7 @@ test_that("working models with p != d are supported", {
   nu <- oracle_nuisance_cate(data)
   res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
               formula = ~-1 + f, working_model = working_model_power_law,
-              p = 2L, tmle = FALSE, bayes = FALSE, nuisance = nu)
+              p = 2L, tmle = FALSE, bayes = FALSE, nuisance_estimates = nu)
 
   expect_equal(res$p, 2L)
   expect_equal(res$d, 1L)

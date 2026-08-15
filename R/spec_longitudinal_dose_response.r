@@ -13,10 +13,6 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
     supports_bayes = FALSE,
     tmle_loss = tmle_loss,
 
-    sweep_criterion = function(eps_list) {
-      max(vapply(eps_list, function(e) max(abs(as.numeric(e))), numeric(1)))
-    },
-
     init_state = function(problem) {
       list(
         mu = list(
@@ -37,32 +33,21 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
       })
     },
 
-    psi_from_state = function(problem, state, detach = TRUE) {
+    psi_from_state = function(problem, state) {
       psi <- state$mu$nodes[[1]]
-      if(detach) {
-        psi <- psi$detach()$clone()
-        psi$requires_grad_(TRUE)
-      }
+      psi <- psi$detach()$clone()
+      psi$requires_grad_(TRUE)
       psi
     },
 
     make_clever = function(problem, step, state, psi, Minv) {
       n <- problem$n
-      k <- problem$K
-      p <- problem$p
-      HA_t <- problem$aux$HA_node[, , step$t]
-      NablaLdot <- torch::torch_stack(
-        batched_NablaLdot(problem$Lm_fn, psi, state$beta,
-                          problem$design_matrix, p, k),
-        dim = 1
-      )
-      d_all <- torch::torch_matmul(Minv, NablaLdot$permute(c(2, 1, 3))) # (n, p, k)
-      HA_perm <- HA_t$t()$reshape(c(n, k, 1)) # (n, k, 1)
-
-      list(arms = d_all$transpose(2, 3) * HA_perm)
+      K <- problem$K
+      d <- clever_directions(problem, psi, state$beta, Minv)
+      list(arms = d * problem$aux$HA_node[, , step$t]$t()$reshape(c(n, K, 1)))
     },
 
-    fluctuation_objective = function(epsilon, problem, step, state, clever, K_Q) {
+    mu_loss = function(epsilon, problem, step, state, clever) {
       mu_node <- state$mu$nodes[[step$t]]
       mu_next <- state$mu$nodes[[step$t + 1]]
       target <- 0
@@ -75,27 +60,20 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
         }
         target <- target + tmle_loss(pred_j, mu_next[, j])
       }
-      Qf <- Q_fluctuation(epsilon, K_Q, state$Q)
-      target - state$Q$log()$sum()
+      target
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
       t <- step$t
-      update <- state$mu$nodes[[t]]$detach()$clone()
-      for(j in seq_len(problem$K)) {
-        update[, j] <- if(tmle_linear) {
-          state$mu$nodes[[t]][, j] + clever$arms[, j, ]$matmul(epsilon)
-        }
-        else {
-          torch::torch_sigmoid(
-            state$mu$nodes[[t]][, j]$logit() + clever$arms[, j, ]$matmul(epsilon)
-          )
-        }
+      lin <- clever$arms$matmul(epsilon)
+      node <- state$mu$nodes[[t]]
+      state$mu$nodes[[t]] <- if(tmle_linear) {
+        (node + lin)$detach()
       }
-      state$mu$nodes[[t]] <- update$detach()
-      if(isTRUE(step$fluctuate_Q)) {
-        state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
+      else {
+        torch::torch_sigmoid(node$logit() + lin)$detach()
       }
+      if(isTRUE(step$fluctuate_Q)) state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
       state$initial <- FALSE
       state
     },
@@ -114,8 +92,26 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
       as_float_tensor(t(apply(resid, c(1, 2), sum))) # (n, k)
     },
 
-    extra_result = function(problem, state) {
-      list(tau = problem$tau, regimes = problem$aux$regimes)
+    nuisance_contract = function(problem, bayes_enabled) {
+      n <- problem$n
+      K <- problem$K
+      tau <- problem$tau
+      b <- outcome_bounds(problem)
+      list(
+        fields = list(
+          nuisance_field("pi", c(n, tau), lower = 0, upper = 1),
+          nuisance_field("mu", c(K, n, tau + 1), lower = b$lo, upper = b$hi, severity = "warning")
+        ),
+        checks = list(
+          function(nu, problem) {
+            Y <- as.numeric(problem$Yt)
+            ok <- vapply(seq_len(K), function(j) {
+              max(abs(nu$mu[j, , problem$tau + 1L] - Y)) < 1e-6
+            }, logical(1))
+            if(all(ok)) TRUE else "nuisance$mu[, , tau + 1] must equal Y for every regime."
+          }
+        )
+      )
     }
   )
 }

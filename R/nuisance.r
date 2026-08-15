@@ -3,17 +3,18 @@
 #' @importFrom SuperLearner SuperLearner.CV.control predict.SuperLearner SuperLearner
 #' @importFrom stats gaussian binomial
 #' @noRd
-nuisance_setup <- function(n, outer_folds, inner_folds, outcome_type, cv = NULL) {
+nuisance_setup <- function(n, control, outcome_type) {
+  cv <- control$folds
   if(is.null(cv)) {
-    cv <- origami::make_folds(n, origami::folds_vfold, V = outer_folds)
-    if (outer_folds == 1) {
+    cv <- origami::make_folds(n, origami::folds_vfold, V = control$outer_folds)
+    if (control$outer_folds == 1) {
       cv[[1]]$training_set <- cv[[1]]$validation_set
     }
   }
 
   list(
     cv = cv,
-    cv_control = SuperLearner::SuperLearner.CV.control(V = inner_folds),
+    cv_control = SuperLearner::SuperLearner.CV.control(V = control$inner_folds),
     outcome_family = if(outcome_type == "binomial") {
       stats::binomial()
     }
@@ -21,6 +22,13 @@ nuisance_setup <- function(n, outer_folds, inner_folds, outcome_type, cv = NULL)
       stats::gaussian()
     }
   )
+}
+
+#' @noRd
+#' @importFrom withr with_seed
+with_nuisance_seed <- function(control, expr) {
+  if(is.null(control$seed)) force(expr)
+  else withr::with_seed(control$seed, expr)
 }
 
 #' Fit a SuperLearner

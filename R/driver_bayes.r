@@ -1,6 +1,6 @@
 #' Jacobian of eps -> beta under the Bayes fluctuation model
 #'
-#' J(eps) = sum_k dB_dpsi[k]' %*% (dpsi_k/deps) + dB_dQ' %*% (dQ/deps)
+#' J(eps) = sum_k dB_dpsi\[k\]' %*% (dpsi_k/deps) + dB_dQ' %*% (dQ/deps)
 #'
 #' @noRd
 bayes_jacobian <- function(problem, psi, Q, beta, dpsi_list, epsilon, K_Q) {
@@ -29,7 +29,7 @@ bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condva
 
   state <- spec$apply_update(problem, step, state, epsilon, clever, K_Q)
 
-  psi <- spec$psi_from_state(problem, state, detach = TRUE)
+  psi <- spec$psi_from_state(problem, state)
   beta <- B(problem$Lm_fn, psi, problem$design_matrix, state$Q, problem$p)
 
   loglik <- spec$bayes_loglik(epsilon, problem, state, clever, state$Q, condvar)
@@ -52,18 +52,18 @@ run_bayes_tmle <- function(problem, spec, fit, control) {
   }
 
   p <- problem$p
-  cache <- fit$cache
+  final <- fit$final
   condvar <- if(is.null(problem$nuisance$condvar)) NULL else as_float_tensor(problem$nuisance$condvar)
 
   log_dens <- function(epsilon) {
-    bayes_log_density(torch::torch_tensor(epsilon), problem, spec, fit$state, cache$clever, cache$K_Q, condvar, control$prior)
+    bayes_log_density(torch::torch_tensor(epsilon), problem, spec, fit$state, final$clever, final$K_Q, condvar, control$prior)
   }
 
   samples <- array(dim = c(control$chains, control$draws, p))
   acc <- 0
   for(chain in seq_len(control$chains)) {
     mcmc <- adaptMCMC::MCMC(
-      log_dens, n = control$draws, init = as.numeric(cache$epsilon),
+      log_dens, n = control$draws, init = as.numeric(final$epsilon),
       adapt = TRUE, acc.rate = control$acc_rate, scale = rep(control$scale, p)
     )
     samples[chain, , ] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = control$draws, byrow = TRUE)

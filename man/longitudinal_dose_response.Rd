@@ -13,23 +13,18 @@ longitudinal_dose_response(
   regimes,
   summary_measures = NULL,
   outcome_type = "binomial",
-  loss = loss_weighted_sum(loss_squared_error),
+  loss = loss_squared_error,
   working_model = working_model_linear,
   p = NULL,
-  learners_trt = "SL.glm",
-  learners_outcome = "SL.glm",
-  outer_folds = 5,
-  inner_folds = 5,
-  tmle = TRUE,
-  tmle_maxiter = 25,
-  tmle_linear = TRUE,
-  epsilon = 1e-05,
-  nuisance = NULL
+  nuisance = nuisance_control(),
+  nuisance_estimates = NULL,
+  tmle = tmle_control(),
+  bayes = FALSE,
+  onestep = onestep_control()
 )
 }
 \arguments{
-\item{data}{A \code{data.frame} containing the columns referenced by \code{Ls},
-\code{As}, and \code{Y}.}
+\item{data}{A \code{data.frame} containing all referenced columns.}
 
 \item{Ls}{A list of length \eqn{tau}, whose \eqn{t}-th element contains the names of
 the time-varying covariates measured at timepoint \eqn{t}. Must have the same length
@@ -64,7 +59,7 @@ different target parameters (Petersen et al., 2014).}
 \item{outcome_type}{Outcome type, either \code{"continuous"} or \code{"binomial"}.}
 
 \item{loss}{The marginal structural model loss function measuring the fidelity of the
-working model to the target functional (e.g. \code{loss_weighted_sum}).}
+working model to the target functional (e.g. \code{loss_squared_error}).}
 
 \item{working_model}{The marginal structural model working model (e.g. \code{working_model_linear}).}
 
@@ -75,48 +70,19 @@ design matrix produced by \code{formula}. When a working model whose
 coefficient dimension does not match the \code{formula}-based design, \code{p}
 should be supplied explicitly to match the working model's true number of coefficients.}
 
-\item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
-the time-varying propensity scores.}
+\item{nuisance}{Settings for nuisance estimation: a \code{\link[=nuisance_control]{nuisance_control()}} object.}
 
-\item{learners_outcome}{A character vector of \pkg{SuperLearner} libraries for
-estimating the sequential outcome regressions.}
-
-\item{outer_folds}{Number of folds in the outer cross-fitting loop.}
-
-\item{inner_folds}{Number of folds for the inner \pkg{SuperLearner} cross-validation
-within each outer cross-fitting fold.}
-
-\item{tmle}{Logical; whether to run the TMLE estimator.}
-
-\item{tmle_maxiter}{Maximum number of TMLE iterations.}
-
-\item{tmle_linear}{Logical; whether to use a linear TMLE fluctuation model
-(\code{TRUE}) or a logistic fluctuation model (\code{FALSE}).}
-
-\item{epsilon}{Adjustment bounding estimated propensities/means away from 0 and 1.}
-
-\item{nuisance}{Optional list of pre-computed nuisance parameters. If \code{NULL}
+\item{nuisance_estimates}{Optional list of pre-computed nuisance parameters. If \code{NULL}
 (the default), nuisance parameters are estimated internally via cross-fitting.}
+
+\item{tmle}{Settings for the targeted estimator: either a logical or a \code{\link[=tmle_control]{tmle_control()}} object.}
+
+\item{bayes}{Settings for the generalized Bayesian estimator: either a logical or a \code{\link[=bayes_control]{bayes_control()}} object.}
+
+\item{onestep}{Settings for the one-step estimator: a \code{\link[=onestep_control]{onestep_control()}} object.}
 }
 \value{
-An object of class \code{"automsm"}: a list with components
-\describe{
-\item{estimand}{Character string, \code{"longitudinal_dose_response"}.}
-\item{p}{Number of working-model coefficients.}
-\item{n}{Sample size.}
-\item{tau}{Number of treatment timepoints \eqn{\tau}.}
-\item{formula}{The working-model formula used.}
-\item{working_model, loss}{The working model and loss function used.}
-\item{terms}{Character vector of working-model design-matrix term names.}
-\item{learners_trt, learners_outcome}{The \pkg{SuperLearner} libraries used.}
-\item{nuisance}{The (estimated or supplied) nuisance parameters.}
-\item{regimes}{A \code{data.frame} of the \eqn{2^\tau} enumerated treatment trajectories.}
-\item{plugin}{A list with the plug-in piont estimate (\code{est}).}
-\item{onestep}{A list with the one-step point estimate (\code{est}), standard
-errors (\code{se}), confidence-interval bounds (\code{lower}, \code{upper}),
-the estimated efficient influence function (\code{eif}), the projected
-conditional means (\code{psi}), and joint draws (\code{joint_draws}).}
-}
+An object of class \code{"automsm"}; see \link{automsm} for the full list of components.
 }
 \description{
 Fits a non-parametric marginal structural model (NP-MSM) summarizing the mean
@@ -134,7 +100,7 @@ The observed data are assumed to have the longitudinal structure
 time-varying covariates, \eqn{A_t \in \{0, 1\}} are time-varying treatment indicators,
 and \eqn{Y} is an end-of-study outcome. All \eqn{2^\tau} static treatment trajectories
 are enumerated, and the mean outcome under each is identified via iterated conditional
-expectations (ICE). THe ICE-based conditional means are then projected onto the working
+expectations (ICE). The ICE-based conditional means are then projected onto the working
 model defined by \code{formula}, \code{working_model}, and \code{loss}.
 
 Nuisance parameters (the time-varying propensity scores and the sequential
@@ -168,6 +134,6 @@ Marginal Structural Working Models. \emph{Journal of Causal Inference}, 2(2):147
 \doi{10.1515/jci-2013-0007}
 }
 \seealso{
-\code{\link{dose_response}} for the analogous estimator with a
-high-dimensional (categorical) point treatment.
+\code{\link[=cate]{cate()}} for conditional average treatment effects,
+\code{\link[=dose_response]{dose_response()}} single-time-point categorical treatments.
 }

@@ -41,7 +41,7 @@ the smallest asymptotic variance possible among regular estimators. Both estimat
 The package has a built in function to generate simulated data for this setting. 
 To begin, let's generate $500$ observations.
 ```{r}
-data <- simulate_cate(N = 500, seed = 10016)
+data <- simulate_cate(N = 500, binary = FALSE, seed = 10016)
 
 head(data)
 ```
@@ -77,7 +77,10 @@ containing only an intercept term (that is, when no effect modifiers are include
 The ATE can be estimated using the `cate` function.
 First, we need to set the SuperLearner methods that will be used to estimate the required nuisance parameters.
 ```{r}
-learners <- "SL.gam"
+nuisance <- nuisance_control(
+  learners_trt = "SL.gam",
+  learners_outcome = "SL.gam"
+)
 ```
 
 Then, we can estimate the ATE:
@@ -89,8 +92,7 @@ fit_ate <- cate(
   "Y",
   formula = ~1,
   outcome_type = "continuous",
-  learners_trt = learners,
-  learners_outcome = learners
+  nuisance = nuisance
 )
 ```
 
@@ -113,10 +115,9 @@ fit <- cate(
   "Y",
   formula = ~1 + X2,
   outcome_type = "continuous",
-  learners_trt = learners,
-  learners_outcome = learners,
   working_model = working_model_linear,
-  loss = loss_squared_error
+  loss = loss_squared_error,
+  nuisance = nuisance
 )
 ```
 
@@ -204,10 +205,9 @@ fit_splines <- cate(
   "Y",
   formula = ~1 + splines::bs(X2, Boundary.knots = c(0, 1), knots = seq(0, 0.75, 0.25)),
   outcome_type = "continuous",
-  learners_trt = learners,
-  learners_outcome = learners,
   working_model = working_model_linear,
-  loss = loss_squared_error
+  loss = loss_squared_error,
+  nuisance = nuisance
 )
 ```
 

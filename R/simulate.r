@@ -108,6 +108,7 @@ simulate_dose_response <- function(
 #' @param beta1 coefficient on the cumulative treatment duration in
 #'   the outcome model (logit scale).
 #' @param binary whether to simulate binary (default) or continuous outcomes.
+#' @param sigma Conditional standard deviation of the outcome (only used if \code{continuous = TRUE}).
 #' @param seed random number seed (optional).
 #' @return data frame of simulated dta with columns L_1, A_1, ..., L_tau, A_tau, Y
 #' @importFrom stats runif rbinom rnorm plogis

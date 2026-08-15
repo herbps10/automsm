@@ -13,8 +13,6 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
     supports_bayes = TRUE,
     tmle_loss = tmle_loss,
 
-    sweep_criterion = function(eps_list) max(abs(as.numeric(eps_list[[1]]))),
-
     init_state = function(problem) {
       list(
         mu = list(
@@ -28,73 +26,46 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
 
     steps = function(problem) list(list(id = 1L, fluctuate_Q = TRUE)),
 
-    psi_from_state = function(problem, state, detach = TRUE) {
+    psi_from_state = function(problem, state) {
       psi <- state$mu$arms
-      if(detach) {
-        psi <- psi$detach()$clone()
-        psi$requires_grad_(TRUE)
-      }
+      psi <- psi$detach()$clone()
+      psi$requires_grad_(TRUE)
+      psi
     },
 
     make_clever = function(problem, step, state, psi, Minv) {
       n <- problem$n
       K <- problem$K
-      p <- problem$p
-      H <- problem$aux$H
-      HA <- problem$aux$HA
-      cl <- torch::torch_zeros(c(n, p))
-      clA <- torch::torch_zeros(c(n, K, p))
-      for(i in 1:n) {
-        d <- Minv$matmul(grad_dL(
-          problem$Lm_fn, psi[i, drop = FALSE], state$beta,
-          problem$design_matrix[i, , drop = FALSE]
-        ))
-
-        cl[i, ] <- torch::torch_reshape(d$matmul(H[i, ]), p)
-        for(j in 1:K) {
-          x <- torch::torch_zeros(K)
-          x[j] <- HA[i, j]
-          clA[i, j, ] <- torch::torch_reshape(d$matmul(x), p)
-        }
-      }
-      list(obs = cl, arms = clA)
+      d <- clever_directions(problem, psi, state$beta, Minv)
+      list(
+        obs = (d * problem$aux$H$reshape(c(n, K, 1)))$sum(dim = 2),
+        arms = d * problem$aux$HA$reshape(c(n, K, 1))
+      )
     },
 
-    fluctuation_objective = function(epsilon, problem, step, state, clever, K_Q) {
+    mu_loss = function(epsilon, problem, step, state, clever) {
       pred <- if(tmle_linear) {
         state$mu$obs + clever$obs$matmul(epsilon)
       }
       else {
         state$mu$obs$logit() + clever$obs$matmul(epsilon)
       }
-      Qf <- Q_fluctuation(epsilon, K_Q, state$Q)
-      tmle_loss(pred, problem$Yt) - Qf$log()$sum()
+      tmle_loss(pred, problem$Yt)
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
-      K <- problem$K
-      obs <- if(tmle_linear) {
-        state$mu$obs + clever$obs$matmul(epsilon)
+      obs_lin <- clever$obs$matmul(epsilon)
+      arms_lin <- clever$arms$matmul(epsilon)
+      if(tmle_linear) {
+        obs <- state$mu$obs + obs_lin
+        arms <- state$mu$arms + arms_lin
       }
       else {
-        torch::torch_sigmoid(state$mu$obs$logit() + clever$obs$matmul(epsilon))
-      }
-
-      arms <- state$mu$arms$detach()$clone()
-      for(k in 1:K) {
-        arms[, k] <- if(tmle_linear) {
-          state$mu$arms[, k] + clever$arms[, k, ]$matmul(epsilon)
-        }
-        else {
-          torch::torch_sigmoid(
-            state$mu$arms[, k]$logit() + clever$arms[, k, ]$matmul(epsilon)
-          )
-        }
+        obs <- torch::torch_sigmoid(state$mu$obs$logit())
+        arms <- torch::torch_sigmoid(state$mu$arms$logit() + arms_lin)
       }
       state$mu <- list(obs = obs$detach(), arms = arms$detach())
-      if(isTRUE(step$fluctuate_Q)) {
-        state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
-      }
+      if(isTRUE(step$fluctuate_Q)) state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
       state
     },
 
@@ -127,6 +98,37 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
         lg <- state$mu$obs$logit() + clever$obs$matmul(epsilon)
         -as.numeric(tmle_loss(lg, problem$Yt)) + as.numeric(Q_eps$log()$sum())
       }
+    },
+
+    nuisance_contract = function(problem, bayes_enabled) {
+      n <- problem$n
+      K <- problem$K
+      b <- outcome_bounds(problem)
+
+      list(
+        fields = list(
+          nuisance_field("pi", n, lower = 0, upper = 1),
+          nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
+          nuisance_field("mu_a", c(n, K), lower = b$lo, upper = b$hi, severity = "warning"),
+          nuisance_field("mu_a", c(n, K), lower = 0, 1),
+          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear)
+        ),
+        checks = list(
+          function(nu, problem) {
+            idx <- cbind(seq_len(problem$n), problem$aux$A_index)
+            if(max(abs(nu$pi - as.matrix(nu$pi_a)[idx])) < 1e-6) {
+              TRUE
+            }
+            else {
+              paste("nuisance$pi must be the propensity of the observed treatment, i.e. pi[i] == pi_a[i, k] where As[k] == A[i].")
+            }
+          },
+          function(nu, problem) {
+            idx <- cbind(seq_len(problem$n), problem$aux$A_index)
+            if(max(abs(nu$mu - as.matrix(nu$mu_a)[idx])) < 1e-6) TRUE else "nuisance$mu must equal mu_a[i, k] where As[k] == A[i]."
+          }
+        )
+      )
     }
   )
 }

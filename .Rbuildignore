@@ -5,3 +5,5 @@
 ^README\.Rmd$
 ^\.positai$
 ^\.claude$
+^data-raw$
+^automsm.ai$

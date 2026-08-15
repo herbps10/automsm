@@ -11,30 +11,18 @@ cate(
   Y,
   formula,
   outcome_type = "binomial",
-  loss = loss_weighted_sum(loss_squared_error),
+  loss = loss_squared_error,
   working_model = working_model_linear,
   p = NULL,
-  learners_trt = "SL.glm",
-  learners_outcome = "SL.glm",
-  outer_folds = 5,
-  inner_folds = 5,
-  tmle = TRUE,
-  tmle_maxiter = 25,
-  tmle_linear = TRUE,
+  nuisance = nuisance_control(),
+  nuisance_estimates = NULL,
+  tmle = tmle_control(),
   bayes = FALSE,
-  bayes_draws = 1000,
-  bayes_chains = 4,
-  bayes_prior = function(beta) {
-     sum(stats::dnorm(as.numeric(beta), mean = 0, sd =
-    1, log = TRUE))
- },
-  epsilon = 1e-05,
-  nuisance = NULL
+  onestep = onestep_control()
 )
 }
 \arguments{
-\item{data}{A \code{data.frame} containing the columns referenced by \code{X},
-\code{A}, and \code{Y}.}
+\item{data}{A \code{data.frame} containing all referenced columns.}
 
 \item{X}{A character vector giving the covariate column names in \code{data}.}
 
@@ -58,54 +46,24 @@ design matrix produced by \code{formula}. When a working model whose
 coefficient dimension does not match the \code{formula}-based design, \code{p}
 should be supplied explicitly to match the working model's true number of coefficients.}
 
-\item{learners_trt}{A character vector of \pkg{SuperLearner} libraries for estimating
-the propensity scores.}
+\item{nuisance}{Settings for nuisance estimation: a \code{\link[=nuisance_control]{nuisance_control()}} object.}
 
-\item{learners_outcome}{A character vector of \pkg{SuperLearner} libraries for
-estimating the outcome regressions.}
+\item{nuisance_estimates}{Optional list of pre-computed nuisance parameters. If \code{NULL}
+(the default), nuisance parameters are estimated internally via cross-fitting.}
 
-\item{outer_folds}{Number of folds in the outer cross-fitting loop.}
+\item{tmle}{Settings for the targeted estimator: either a logical or a \code{\link[=tmle_control]{tmle_control()}} object.}
 
-\item{inner_folds}{Number of folds for the inner \pkg{SuperLearner} cross-validation
-within each outer cross-fitting fold.}
+\item{bayes}{Settings for the generalized Bayesian estimator: either a logical or a \code{\link[=bayes_control]{bayes_control()}} object.}
 
-\item{tmle}{Logical; whether to run the TMLE estimator.}
-
-\item{tmle_maxiter}{Maximum number of TMLE iterations.}
-
-\item{tmle_linear}{Logical; whether to use a linear TMLE fluctuation model
-(\code{TRUE}) or a logistic fluctuation model (\code{FALSE}).}
-
-\item{bayes}{whether to run Bayesian TMLE estimator}
-
-\item{bayes_draws}{number of MCMC samples}
-
-\item{bayes_chains}{number of independent MCMC chains}
-
-\item{bayes_prior}{prior to apply to marginal structural model parameters}
-
-\item{epsilon}{Adjustment bounding estimated propensities/means away from 0 and 1.}
-
-\item{nuisance}{Optional list of pre-computed nuisance parameters. If \code{NULL}
-(the default), nuisance parameters are estimated internally via cross-fitting.
-
-#' @return An object of class \code{"automsm"}: a list with components
-\describe{
-\item{estimand}{Character string, \code{"cate"}.}
-\item{p}{Number of working-model coefficients.}
-\item{n}{Sample size.}
-\item{formula}{The working-model formula used.}
-\item{working_model, loss}{The working model and loss function used.}
-\item{terms}{Character vector of working-model design-matrix term names.}
-\item{learners_trt, learners_outcome}{The \pkg{SuperLearner} libraries used.}
-\item{nuisance}{The (estimated or supplied) nuisance parameters.}
-\item{plugin}{A list with the plug-in point estimate (\code{est}).}
-\item{onestep}{A list with the one-step point estimate (\code{est}), standard
-errors (\code{se}), confidence-interval bounds (\code{lower}, \code{upper}),
-the estimated efficient influence function (\code{eif}), and joint draws
-(\code{joint_draws}).}
-}}
+\item{onestep}{Settings for the one-step estimator: a \code{\link[=onestep_control]{onestep_control()}} object.}
+}
+\value{
+An object of class \code{"automsm"}; see \link{automsm} for the full list of components.
 }
 \description{
 Estimate Marginal Structural Model for the Conditional Average Treatment Effect (CATE)
+}
+\seealso{
+\code{\link[=dose_response]{dose_response()}} for a categorical point treatment,
+\code{\link[=longitudinal_dose_response]{longitudinal_dose_response()}} for time-varying treatment.
 }

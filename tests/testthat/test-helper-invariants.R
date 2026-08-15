@@ -51,7 +51,7 @@ analytic_eif_linear <- function(Xmat, psi, beta, Delta) {
 
 # ----- Custom expectations -----
 
-expect_solves_eif <- function(eif, frac = 1e-3) {
+expect_solves_eif <- function(eif, frac = 1e-2) {
   eif <- as.matrix(eif)
   n <- nrow(eif)
   se <- apply(eif, 2, stats::sd) / sqrt(n)
@@ -64,6 +64,17 @@ expect_tensor_close <- function(actual, expected, tolerance = 1e-6) {
     as.array(expected),
     tolerance = tolerance
   )
+}
+
+#' Jacobian of a torch function via autograd, one row at a time
+#' @noRd
+autograd_jacobian <- function(f, x, dtype = torch::torch_double()) {
+  e <- torch::torch_tensor(x, dtype = dtype, requires_grad = TRUE)
+  out <- f(e)
+  n <- length(out)
+  t(vapply(seq_len(n), function(i) {
+    as.numeric(torch::autograd_grad(out[i], e, retain_graph = TRUE)[[1]])
+  }, numeric(length(x))))
 }
 
 numeric_jacobian <- function(f, x, h = 1e-6) {

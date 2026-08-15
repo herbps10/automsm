@@ -3,5 +3,9 @@
 #' @param X design matrix (must be of type \code{torch::tensor})
 #' @export
 working_model_linear <- function(beta, X) {
-  X$matmul(beta)
+  if(beta$dim() == 1L) {
+    X$matmul(beta)
+  } else {
+    torch::torch_einsum("nkd,nd->nk", list(X, beta))
+  }
 }

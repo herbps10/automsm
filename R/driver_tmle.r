@@ -3,7 +3,6 @@ run_tmle <- function(problem, spec, control, state) {
   tol <- control$tol %||% spec$tol
   converged <- TRUE
   iter <- 0L
-  cache <- NULL
 
   for(it in seq_len(control$maxiter)) {
     iter <- it
@@ -12,15 +11,22 @@ run_tmle <- function(problem, spec, control, state) {
     for(s in seq_along(steps)) {
       step <- steps[[s]]
 
-      psi <- spec$psi_from_state(problem, state, detach = TRUE)
+      psi <- spec$psi_from_state(problem, state)
       Minv <- normalizing_matrix(problem$Lm_fn, psi, state$beta,
                                  problem$design_matrix, state$Q, problem$p)
       K_Q <- calculate_K(problem$Lm_fn, psi, state$beta,
-                         problem$design_matrix, Minv)
+                         problem$design_matrix, Minv, problem$batched_beta)
       clever <- spec$make_clever(problem, step, state, psi, Minv)
-      eps <- tmle_mle(problem$p, function(epsilon) {
-        spec$fluctuation_objective(epsilon, problem, step, state, clever, K_Q)
-      })
+
+      obj <- function(epsilon) {
+        target <- spec$mu_loss(epsilon, problem, step, state, clever)
+        if(isTRUE(steps$fluctuate_Q)) {
+          target <- target - Q_fluctuation(epsilon, K_Q, state$Q)$log()$sum()
+        }
+        target
+      }
+
+      eps <- tmle_mle(problem$p, obj)
 
       if(spec$nan_guard && any(is.nan(as.numeric(eps)))) {
         warning("TMLE failed to converge.")
@@ -29,9 +35,6 @@ run_tmle <- function(problem, spec, control, state) {
       }
 
       eps_list[[s]] <- eps
-
-      cache <- list(step = step, psi = psi, Minv = Minv, K_Q = K_Q,
-                    clever = clever, epsilon = eps)
 
       state <- spec$apply_update(problem, step, state, eps, clever, K_Q)
 
@@ -43,12 +46,27 @@ run_tmle <- function(problem, spec, control, state) {
     if(abs(spec$sweep_criterion(eps_list)) < tol) break
   }
 
-  list(state = state, converged = converged, iter = iter,
-       cache = cache, steps = steps)
+  if(converged) {
+    psi_f <- spec$psi_from_state(problem, state)
+    Minv_f <- normalizing_matrix(problem$Lm_fn, psi_f, state$beta,
+                                 problem$design_matrix, state$Q, problem$p)
+
+    final <- list(
+      psi = psi_f, Minv = Minv_f,
+      K_Q = calculate_K(problem$Lm_fn, psi_f, state$beta,
+                        problem$design_matrix, Minv_f, problem$batched_beta),
+      clever = spec$make_clever(problem, steps[[length(steps)]], state, psi_f, Minv_f),
+      epsilon = eps_list[[length(steps)]]
+    )
+  } else {
+    final <- NULL
+  }
+
+  list(state = state, converged = converged, iter = iter, steps = steps, final = final)
 }
 
 update_beta <- function(problem, spec, state) {
-  psi <- spec$psi_from_state(problem, state, detach = TRUE)
+  psi <- spec$psi_from_state(problem, state)
   beta <- B(problem$Lm_fn, psi, problem$design_matrix, state$Q, problem$p)$detach()$clone()
   beta$requires_grad_(TRUE)
   state$beta <- beta
@@ -71,11 +89,11 @@ finalize_tmle <- function(problem, spec, fit) {
     ))
   }
 
-  psi <- spec$psi_from_state(problem, fit$state, detach = TRUE)
+  psi <- spec$psi_from_state(problem, fit$state)
 
   est <- B(problem$Lm_fn, psi, problem$design_matrix, fit$state$Q, problem$p)
   Delta <- spec$delta(problem, fit$state)
-  eifm <- eif(problem$Lm_fn, psi, est, problem$design_matrix, fit$state$Q, Delta, problem$p)
+  eifm <- eif(problem$Lm_fn, psi, est, problem$design_matrix, fit$state$Q, Delta, problem$p, problem$batched_beta)
   se <- apply(eifm, 2, stats::sd) / sqrt(n)
 
   list(
@@ -87,36 +105,4 @@ finalize_tmle <- function(problem, spec, fit) {
     converged = TRUE,
     iter = fit$iter
   )
-}
-
-run_bayes_tmle_shim <- function(problem, spec, fit, tmle_linear, draws, chains, prior) {
-  p <- problem$p
-  state <- fit$state
-  cache <- fit$cache
-  samples <- array(dim = (c(chains, draws, p)))
-  acc <- 0
-
-  log_dens <- function(epsilon) {
-    old_cate_fluctuation_model(
-      torch::torch_tensor(epsilon),
-      problem$Lm_fn,
-      state$mu$obs, state$mu$a0, state$mu$a1,
-      cache$clever$obs, cache$clever$a0, cache$clever$a1,
-      cache$K_Q, state$Q, problem$Yt, problem$design_matrix,
-      condvar = torch::torch_tensor(problem$nuisance$condvar),
-      bayes = TRUE,
-      bayes_prior = prior,
-      tmle_loss = spec$tmle_loss
-    )
-  }
-
-  for(chain in seq_len(chains)) {
-    mcmc <- adaptMCMC::MCMC(log_dens, n = draws, init = as.numeric(cache$epsilon),
-                            adapt = TRUE, acc.rate = 0.3, scale = rep(1e-3, p))
-
-    samples[chain, , ] <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = draws, byrow = TRUE)
-
-    acc <- acc + mcmc$acceptance.rate / chains
-  }
-  list(samples = samples, acc_rate = acc)
 }

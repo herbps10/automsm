@@ -15,7 +15,7 @@
 #' time-varying covariates, \eqn{A_t \in \{0, 1\}} are time-varying treatment indicators,
 #' and \eqn{Y} is an end-of-study outcome. All \eqn{2^\tau} static treatment trajectories
 #' are enumerated, and the mean outcome under each is identified via iterated conditional
-#' expectations (ICE). THe ICE-based conditional means are then projected onto the working
+#' expectations (ICE). The ICE-based conditional means are then projected onto the working
 #' model defined by \code{formula}, \code{working_model}, and \code{loss}.
 #'
 #' Nuisance parameters (the time-varying propensity scores and the sequential
@@ -27,15 +27,13 @@
 #' weights that appear in the efficient influence function.
 #'
 #'
-#' @param data A \code{data.frame} containing the columns referenced by \code{Ls},
-#'   \code{As}, and \code{Y}.
+#' @inheritParams automsm_shared_params
 #' @param Ls A list of length \eqn{tau}, whose \eqn{t}-th element contains the names of
 #'   the time-varying covariates measured at timepoint \eqn{t}. Must have the same length
 #'   as \code{As}.
 #' @param As A character vector of length \eqn{\tau} giving the treatment column names,
 #'   ordered by timepoint. All entries must be columns of \code{data}.
 #' @param Y A string naming the outcome column in \code{data}.
-#' @param formula A model formula specifying the marginal structural working-model design matrix.
 #' @param regimes The set of treatment trajectories \eqn{\bar{a} \in \{0, 1\}^\tau}
 #'   over which the NP-MSM is defined. Supplied as a \code{data.frame} (or matrix)
 #'   with \eqn{K} rows and \eqn{\tau} columns, where each row is one trajectory
@@ -53,57 +51,16 @@
 #'   measures are constructed. Note the choice of summary measures
 #'   is part of the estimand definition, and different summaries define
 #'   different target parameters (Petersen et al., 2014).
-#' @param outcome_type Outcome type, either \code{"continuous"} or \code{"binomial"}.
-#' @param loss The marginal structural model loss function measuring the fidelity of the
-#'   working model to the target functional (e.g. \code{loss_weighted_sum}).
-#' @param working_model The marginal structural model working model (e.g. \code{working_model_linear}).
-#' @param p Integer giving the dimension of the working-model parameter
-#'   \eqn{\beta} (the number of working-model coefficients). If \code{NULL}
-#'   (the default), \code{p} is inferred from the number of columns in the
-#'   design matrix produced by \code{formula}. When a working model whose
-#'   coefficient dimension does not match the \code{formula}-based design, \code{p}
-#'   should be supplied explicitly to match the working model's true number of coefficients.
-#' @param learners_trt A character vector of \pkg{SuperLearner} libraries for estimating
-#'   the time-varying propensity scores.
-#' @param learners_outcome A character vector of \pkg{SuperLearner} libraries for
-#'   estimating the sequential outcome regressions.
-#' @param outer_folds Number of folds in the outer cross-fitting loop.
-#' @param inner_folds Number of folds for the inner \pkg{SuperLearner} cross-validation
-#'   within each outer cross-fitting fold.
-#' @param tmle Logical; whether to run the TMLE estimator.
-#' @param tmle_maxiter Maximum number of TMLE iterations.
-#' @param tmle_linear Logical; whether to use a linear TMLE fluctuation model
-#'   (\code{TRUE}) or a logistic fluctuation model (\code{FALSE}).
-#' @param epsilon Adjustment bounding estimated propensities/means away from 0 and 1.
-#' @param nuisance Optional list of pre-computed nuisance parameters. If \code{NULL}
-#'   (the default), nuisance parameters are estimated internally via cross-fitting.
 #'
-#' @return An object of class \code{"automsm"}: a list with components
-#'   \describe{
-#'     \item{estimand}{Character string, \code{"longitudinal_dose_response"}.}
-#'     \item{p}{Number of working-model coefficients.}
-#'     \item{n}{Sample size.}
-#'     \item{tau}{Number of treatment timepoints \eqn{\tau}.}
-#'     \item{formula}{The working-model formula used.}
-#'     \item{working_model, loss}{The working model and loss function used.}
-#'     \item{terms}{Character vector of working-model design-matrix term names.}
-#'     \item{learners_trt, learners_outcome}{The \pkg{SuperLearner} libraries used.}
-#'     \item{nuisance}{The (estimated or supplied) nuisance parameters.}
-#'     \item{regimes}{A \code{data.frame} of the \eqn{2^\tau} enumerated treatment trajectories.}
-#'     \item{plugin}{A list with the plug-in piont estimate (\code{est}).}
-#'     \item{onestep}{A list with the one-step point estimate (\code{est}), standard
-#'       errors (\code{se}), confidence-interval bounds (\code{lower}, \code{upper}),
-#'       the estimated efficient influence function (\code{eif}), the projected
-#'       conditional means (\code{psi}), and joint draws (\code{joint_draws}).}
-#'   }
+#' @return An object of class \code{"automsm"}; see [automsm] for the full list of components.
+#'
+#' @seealso [cate()] for conditional average treatment effects,
+#'   [dose_response()] single-time-point categorical treatments.
 #'
 #' @references Petersen M, Schwab J, Gruber S, Blaser N, Schomaker M, van der Laan M.
 #' (2014) Targeted Maximum Likelihood Estimation for Dynamic and Static Longitudinal
 #' Marginal Structural Working Models. \emph{Journal of Causal Inference}, 2(2):147-185.
 #' \doi{10.1515/jci-2013-0007}
-#'
-#' @seealso \code{\link{dose_response}} for the analogous estimator with a
-#'   high-dimensional (categorical) point treatment.
 #'
 #' @examples
 #' \dontrun{
@@ -137,53 +94,66 @@ longitudinal_dose_response <- function(
   loss = loss_squared_error,
   working_model = working_model_linear,
   p = NULL,
-  learners_trt = "SL.glm",
-  learners_outcome = "SL.glm",
-  outer_folds = 5,
-  inner_folds = 5,
-  tmle = TRUE,
-  tmle_maxiter = 25,
-  tmle_linear = TRUE,
-  epsilon = 1e-5,
-  nuisance = NULL
+  nuisance = nuisance_control(),
+  nuisance_estimates = NULL,
+  tmle = tmle_control(),
+  bayes = FALSE,
+  onestep = onestep_control()
 ) {
+  nuisance <- as_nuisance_control(nuisance)
+  tmle <- as_tmle_control(tmle)
+  bayes <- as_bayes_control(bayes)
+  onestep <- as_onestep_control(onestep)
+
   validate_longitudinal_arguments(
     data, Ls, As, Y, formula, summary_measures,
     outcome_type, loss, working_model, p,
-    learners_trt, learners_outcome,
-    outer_folds, inner_folds,
-    tmle, tmle_maxiter, tmle_linear,
-    epsilon, nuisance
+    nuisance_estimates
   )
 
-  n <- nrow(data)
-  tau <- length(As)
-  k <- nrow(regimes)
-  stopifnot(identical(colnames(regimes), As))
-
-  # Set up cross-train so the same training and valid folds
-  # are used in propensity scores and ICE regressions
-  cv <- origami::make_folds(nrow(data), origami::folds_vfold, V = outer_folds)
-  if (outer_folds == 1) {
-    cv[[1]]$training_set <- cv[[1]]$validation_set
-  }
-
-  if (is.null(nuisance)) {
-    nuisance <- estimate_longitudinal_dose_response_nuisance(
+  if (is.null(nuisance_estimates)) {
+    nuisance_estimates <- with_nuisance_seed(nuisance, estimate_longitudinal_dose_response_nuisance(
       data,
       Ls,
       As,
       Y,
       regimes,
-      learners_trt,
-      learners_outcome,
-      cv,
-      outer_folds,
-      inner_folds,
-      outcome_type,
-      epsilon = epsilon
-    )
+      nuisance,
+      outcome_type
+    ))
   }
+
+  problem <- longitudinal_dose_response_problem(
+    data, Ls, As, Y, formula,
+    regimes, summary_measures,
+    p, outcome_type,
+    loss, working_model,
+    nuisance_estimates
+  )
+
+  spec <- msm_spec_longitudinal_dose_response(tmle_linear = tmle$linear)
+
+  res <- fit_msm(
+    problem, spec,
+    tmle = tmle,
+    bayes = bayes,
+    onestep = onestep
+  )
+
+  new_automsm(problem, res$base, res$tmle, bayes_tmle = NULL, nuisance)
+}
+
+longitudinal_dose_response_problem <- function(data, Ls, As, Y, formula,
+                                               regimes, summary_measures,
+                                               p = NULL,
+                                               outcome_type = "binomial",
+                                               loss = loss_squared_error,
+                                               working_model = working_model_linear,
+                                               nuisance_estimates) {
+  n <- nrow(data)
+  tau <- length(As)
+  k <- nrow(regimes)
+  stopifnot(identical(colnames(regimes), As))
 
   if(!is.null(summary_measures)) {
     # ---- Convenience path: build k x n x p tensor from formula + summaries ----
@@ -206,12 +176,12 @@ longitudinal_dose_response <- function(
     dm <- build_design_tensor(formula, data, K = k, mutate = NULL, p = p)
   }
 
-  pi_cumprod <- cumulative_propensity_scores(regimes, nuisance$pi)
+  pi_cumprod <- cumulative_propensity_scores(regimes, nuisance_estimates$pi)
   W <- on_protocol_weights(regimes, as.matrix(data[, As, drop = FALSE]))
   HA_node <- W / pi_cumprod
   stopifnot(all(is.finite(HA_node)))
 
-  problem <- new_msm_problem(
+  new_msm_problem(
     estimand = "longitudinal_dose_response", K = k, d = dm$d, p = dm$p, tau = tau,
     design_matrix = dm$design_matrix,
     Q0 = torch::torch_tensor(rep(1 / n, n)),
@@ -219,34 +189,15 @@ longitudinal_dose_response <- function(
     Lm_fn = Lm(loss, working_model),
     loss = loss, working_model = working_model,
     formula = formula, terms = dm$terms,
-    outcome_type = outcome_type, nuisance = nuisance,
+    outcome_type = outcome_type, nuisance_estimates = nuisance_estimates,
     aux = list(
       HA_node = torch::torch_tensor(HA_node),
       pi_cumprod = pi_cumprod,
       W = W,
       regimes = regimes,
       Ls = Ls,
-      As = As,
-      cv = cv
+      As = As
     )
-  )
-
-  spec <- msm_spec_longitudinal_dose_response(tmle_linear = tmle_linear)
-
-  res <- fit_msm(
-    problem, spec,
-    tmle = tmle_control(tmle, tmle_maxiter, tmle_linear),
-    bayes = bayes_control(enabled = FALSE),
-    onestep = onestep_control(1e3, 1)
-  )
-
-  assemble_result(
-    "longitudinal_dose_response", problem$p, problem$d, problem$n, formula, working_model,
-    loss, problem$terms, learners_trt, learners_outcome, nuisance,
-    plugin = res$base$plugin, onestep = res$base$onestep,
-    tmle = res$tmle,
-    bayes_tmle = NULL,
-    tau = tau, regimes = regimes
   )
 }
 
@@ -478,24 +429,19 @@ estimate_longitudinal_dose_response_nuisance <- function(
   As,
   Y,
   regimes,
-  learners_trt,
-  learners_outcome,
-  cv,
-  outer_folds,
-  inner_folds,
-  outcome_type,
-  epsilon = 1e-5
+  control,
+  outcome_type
 ) {
-  setup <- nuisance_setup(nrow(data), outer_folds, inner_folds, outcome_type, cv)
+  setup <- nuisance_setup(nrow(data), control, outcome_type)
 
   pi_hat <- estimate_longitudinal_dose_response_propensity_scores(
     data,
     Ls,
     As,
     setup$cv,
-    learners_trt,
+    control$learners_trt,
     setup$cv_control,
-    epsilon
+    control$epsilon
   )
 
   mu_hat <- estimate_longitudinal_dose_response_regressions(
@@ -504,12 +450,12 @@ estimate_longitudinal_dose_response_nuisance <- function(
     As,
     Y,
     regimes,
-    learners_outcome,
+    control$learners_outcome,
     setup$cv,
     outcome_type,
     setup$outcome_family,
     setup$cv_control,
-    epsilon
+    control$epsilon
   )
 
   list(
