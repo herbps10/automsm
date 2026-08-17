@@ -307,7 +307,7 @@ test_that("dose_response generalized posterior with binary outcome concentrates 
     formula = ~1 + A,
     nuisance_estimates = oracle_nuisance_dose_response(data),
     outcome_type = "binomial",
-    tmle = tmle_control(linear = FALSE),
+    tmle = TRUE,
     bayes = bayes_control(
       chains = 2,
       warmup = 500,
@@ -330,7 +330,7 @@ test_that("dose_response generalized posterior with continuous outcome concentra
     formula = ~A,
     nuisance_estimates = oracle_nuisance_dose_response(data),
     outcome_type = "continuous",
-    tmle = tmle_control(linear = TRUE),
+    tmle = TRUE,
     bayes = bayes_control(
       chains = 2,
       warmup = 500,

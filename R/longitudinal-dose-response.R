@@ -101,7 +101,7 @@ longitudinal_dose_response <- function(
   onestep = onestep_control()
 ) {
   nuisance <- as_nuisance_control(nuisance)
-  tmle <- as_tmle_control(tmle)
+  tmle <- resolve_fluctuation(as_tmle_control(tmle), outcome_type)
   bayes <- as_bayes_control(bayes)
   onestep <- as_onestep_control(onestep)
 

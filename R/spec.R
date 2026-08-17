@@ -4,7 +4,9 @@
 new_msm_spec <- function(
   estimand,
   init_state, steps, psi_from_state,
-  make_clever, mu_loss, apply_update, delta,
+  make_clever,
+  fluctuation_offset, fluctuation_glm,
+  mu_loss, apply_update, delta,
   tol,
   tmle_loss,
   nan_guard = TRUE,
@@ -17,6 +19,7 @@ new_msm_spec <- function(
   spec <- list(
     estimand = estimand,
     init_state = init_state, steps = steps, psi_from_state = psi_from_state,
+    fluctuation_offset = fluctuation_offset, fluctuation_glm = fluctuation_glm,
     make_clever = make_clever, mu_loss = mu_loss, apply_update = apply_update, delta = delta,
     tol = tol, sweep_criterion = sweep_criterion,
     tmle_loss = tmle_loss,
@@ -38,6 +41,7 @@ default_sweep_criterion <- function(eps_list) {
 
 validate_spec <- function(spec) {
   fns <- c("init_state", "steps", "psi_from_state", "make_clever",
+           "fluctuation_offset", "fluctuation_glm",
            "mu_loss", "apply_update", "delta", "sweep_criterion",
            "bayes_clever_scale", "nuisance_contract")
 

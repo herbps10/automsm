@@ -1,24 +1,4 @@
-#' Minimise a fluctuation objective over epsilon
-#'
-#' \code{obj_fn} is a closure of \code{epsilon} only.
-#'
-#' @importFrom torch torch_tensor optim_lbfgs
-#' @noRd
-tmle_mle <- function(p, obj_fn) {
-  epsilon <- torch::torch_tensor(rep(0, p), requires_grad = TRUE)
-  optimizer <- torch::optim_lbfgs(epsilon, max_iter = 20)
 
-  for (iter in 1:2) {
-    optimizer$step(function() {
-      optimizer$zero_grad()
-      target <- obj_fn(epsilon)
-      target$backward(retain_graph = TRUE)
-      target
-    })
-  }
-  optimizer$zero_grad()
-  epsilon
-}
 
 #' Clever covariate for marginal distribution of covariates
 #' @noRd

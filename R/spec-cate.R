@@ -1,6 +1,7 @@
 msm_spec_cate <- function(tmle_linear = TRUE) {
   tmle_loss <- if(tmle_linear) {
-    torch::nn_mse_loss(reduction = "sum")
+    f <- torch::nn_mse_loss(reduction = "sum")
+    function(x, y) 0.5 * f(x, y)
   }
   else {
     torch::nn_bce_with_logits_loss(reduction = "sum")
@@ -54,22 +55,42 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       )
     },
 
-    mu_loss = function(epsilon, problem, step, state, clever) {
+    fluctuation_offset = function(problem, step, state) {
+      m <- state$mu$obs[, 1]
       if(tmle_linear) {
-        pred <- state$mu$obs[, 1] + clever$obs$matmul(epsilon)
+        m
       }
       else {
-        pred <- state$mu$obs[, 1]$logit() + clever$obs$matmul(epsilon)
+        m$logit()
       }
-      tmle_loss(pred, problem$Yt)
+    },
+
+    fluctuation_glm = function(problem, step, state, clever) {
+      list(X = as.matrix(clever$obs),
+           offset = as.numeric(clever$offset),
+           target = as.numeric(problem$Yt))
+    },
+
+    mu_loss = function(epsilon, problem, step, state, clever) {
+      tmle_loss(clever$offset + clever$obs$matmul(epsilon), problem$Yt)
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
       n <- problem$n
+
+      fluctuate <- function(col, cc) {
+        if(tmle_linear) {
+          col + cc$matmul(epsilon)
+        }
+        else {
+          clamp_fit(torch::torch_sigmoid(col$logit() + cc$matmul(epsilon)), problem$clamp)
+        }
+      }
+
       state$mu <- list(
-        obs = fluctuate(state$mu$obs[, 1], clever$obs, epsilon)$reshape(c(n, 1)),
-        a0 = fluctuate(state$mu$a0[, 1], clever$a0, epsilon)$reshape(c(n, 1)),
-        a1 = fluctuate(state$mu$a1[, 1], clever$a1, epsilon)$reshape(c(n, 1))
+        obs = fluctuate(state$mu$obs[, 1], clever$obs)$reshape(c(n, 1))$detach(),
+        a0 = fluctuate(state$mu$a0[, 1], clever$a0)$reshape(c(n, 1))$detach(),
+        a1 = fluctuate(state$mu$a1[, 1], clever$a1)$reshape(c(n, 1))$detach()
       )
 
       if(isTRUE(step$fluctuate_Q)) {

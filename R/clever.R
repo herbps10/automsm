@@ -14,3 +14,10 @@ clever_directions <- function(problem, psi, beta, Minv) {
   d <- torch::torch_matmul(Minv, Nabla$permute(c(2, 1, 3)))
   d$transpose(2, 3)
 }
+
+#' Keep a fluctuated conditional mean strictly interior
+#' @noRd
+clamp_fit <- function(x, bound) {
+  if(is.null(bound) || bound <= 0) return(x)
+  x$clamp(min = bound, max = 1 - bound)
+}

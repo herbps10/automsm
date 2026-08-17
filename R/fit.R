@@ -12,6 +12,10 @@ fit_msm <- function(problem, spec,
 
   validate_nuisance(problem, spec, bayes_enabled = bayes$enabled)
 
+  checkmate::assert_number(bayes$prior(rep(0, problem$p)), finite = TRUE, .var.name = "bayes_control(prior)")
+
+  problem$clamp <- if(tmle$linear) NULL else tmle$clamp %||% problem$nuisance_control$epsilon
+
   state0 <- spec$init_state(problem)
   psi0 <- spec$psi_from_state(problem, state0)
 

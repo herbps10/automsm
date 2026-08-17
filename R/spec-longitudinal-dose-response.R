@@ -1,6 +1,7 @@
 msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
   tmle_loss <- if(tmle_linear) {
-    torch::nn_mse_loss(reduction = "sum")
+    f <- torch::nn_mse_loss(reduction = "sum")
+    function(x, y) 0.5 * f(x, y)
   }
   else {
     torch::nn_bce_with_logits_loss(reduction = "sum")
@@ -29,7 +30,7 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
     # Backward sweep over ICE nodes. Q is fluctuated once per sweep, at t = 1.
     steps = function(problem) {
       lapply(problem$tau:1, function(t) {
-        list(id = t, t = t, fluctuate_q = (t == 1L))
+        list(id = t, t = t, fluctuate_Q = (t == 1L))
       })
     },
 
@@ -47,33 +48,31 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
       list(arms = d * problem$aux$HA_node[, , step$t]$t()$reshape(c(n, K, 1)))
     },
 
+    fluctuation_offset = function(problem, step, state) {
+      node <- state$mu$nodes[[step$t]]
+      if(tmle_linear) node else node$logit()
+    },
+
+    fluctuation_glm = function(problem, step, state, clever) {
+      N <- problem$n * problem$K
+      list(
+        X = as.matrix(clever$arms$reshape(c(N, problem$p))),
+        offset = as.numeric(clever$offset$reshape(N)),
+        target = as.numeric(state$mu$nodes[[step$t + 1L]]$reshape(N))
+      )
+    },
+
     mu_loss = function(epsilon, problem, step, state, clever) {
-      mu_node <- state$mu$nodes[[step$t]]
-      mu_next <- state$mu$nodes[[step$t + 1]]
-      target <- 0
-      for(j in seq_len(problem$K)) {
-        pred_j <- if(tmle_linear) {
-          mu_node[, j] + clever$arms[, j, ]$matmul(epsilon)
-        }
-        else {
-          mu_node[, j]$logit() + clever$arms[, j, ]$matmul(epsilon)
-        }
-        target <- target + tmle_loss(pred_j, mu_next[, j])
-      }
-      target
+      tmle_loss(clever$offset + clever$arms$matmul(epsilon), state$mu$nodes[[step$t + 1L]])
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
-      t <- step$t
-      lin <- clever$arms$matmul(epsilon)
-      node <- state$mu$nodes[[t]]
-      state$mu$nodes[[t]] <- if(tmle_linear) {
-        (node + lin)$detach()
+      eta <- clever$offset + clever$arms$matmul(epsilon)
+      update <- if(tmle_linear) eta else clamp_fit(torch::torch_sigmoid(eta), problem$clamp)
+      state$mu$nodes[[step$t]] <- update$detach()
+      if(isTRUE(step$fluctuate_Q)) {
+        state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
       }
-      else {
-        torch::torch_sigmoid(node$logit() + lin)$detach()
-      }
-      if(isTRUE(step$fluctuate_Q)) state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
       state$initial <- FALSE
       state
     },

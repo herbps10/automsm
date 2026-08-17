@@ -265,7 +265,7 @@ test_that("cate TMLE solves the EIF estimating equation", {
 
   for(linear in c(TRUE, FALSE)) {
     res <- cate(data, X = paste0("X", 1:4), A = "A", Y = "Y",
-                formula = ~X4, tmle = tmle_control(linear = linear),
+                formula = ~X4, tmle = tmle_control(linear = if(linear) "linear" else "logistic"),
                 outcome = "binomial",
                 nuisance_estimates = nu)
 
@@ -351,10 +351,10 @@ test_that("every mu component responds to epsilon, and eps = 0 is identity", {
       data <- sim1_data(n = 60L, seed = 10016)
       if(param == "cate") {
         nu <- oracle_nuisance_cate(data)
-        it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = linear))
+        it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = if(linear) "linear" else "logistic"))
       } else {
         nu <- oracle_nuisance_dose_response(data)
-        it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(linear = linear))
+        it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(linear = if(linear) "linear" else "logistic"))
       }
 
       problem <- it$problem

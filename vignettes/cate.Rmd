@@ -203,7 +203,7 @@ fit_splines <- cate(
   c("X1", "X2"),
   "A",
   "Y",
-  formula = ~1 + splines::bs(X2, Boundary.knots = c(0, 1), knots = seq(0, 0.75, 0.25)),
+  formula = ~1 + splines::bs(X2, Boundary.knots = c(0, 1), knots = seq(0.25, 0.75, 0.25)),
   outcome_type = "continuous",
   working_model = working_model_linear,
   loss = loss_squared_error,

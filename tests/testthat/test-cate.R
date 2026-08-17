@@ -72,7 +72,7 @@ test_that("cate continous binary TMLE fixture is stable", {
     "Y",
     formula = ~1 + X2,
     outcome_type = "binomial",
-    tmle = TRUE,,
+    tmle = TRUE,
     nuisance_estimates = fx$nuisance_estimates
   )
 
@@ -363,3 +363,31 @@ test_that("cate generalized posterior with continuous outcome concentrates as pr
   expect_true(all(s$rhat < 1.05))
 })
 
+# ------ Newton solver -----
+test_that("analytic GLM agrees with spec$mu_loss (value and gradient)", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  for(linear in c(TRUE, FALSE)) {
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = if(linear) "linear" else "logistic"))
+
+    problem <- it$problem
+    spec <- it$spec
+    state <- it$state0
+
+    step <- spec$steps(problem)[[1]]
+    psi <- spec$psi_from_state(problem, state)
+    Minv <- normalizing_matrix(problem$Lm_fn, psi, state$beta, problem$design_matrix, state$Q, problem$p)
+    cl <- spec$make_clever(problem, step, state, psi, Minv)
+    cl$offset <- spec$fluctuation_offset(problem, step, state)
+    g <- spec$fluctuation_glm(problem, step, state, cl)
+    fam <- fluctuation_family(linear)
+
+    for(e in list(rep(0, problem$p), c(0.03, -0.02), c(-0.11, 0.07))) {
+      eta <- as.vector(g$offset + g$X %*% e)
+      expect_equal(sum(fam$dev(eta, g$target)), as.numeric(spec$mu_loss(torch::torch_tensor(e), problem, step, state, cl)), tolerance = 1e-4)
+      et <- torch::torch_tensor(e, requires_grad = TRUE)
+      ag <- as.numeric(torch::autograd_grad(spec$mu_loss(et, problem, step, state, cl), et)[[1]])
+      expect_equal(as.vector(crossprod(g$X, fam$grad(eta, g$target))), ag, tolerance = 1e-4)
+    }
+  }
+})

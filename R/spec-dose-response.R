@@ -1,6 +1,7 @@
 msm_spec_dose_response <- function(tmle_linear = TRUE) {
   tmle_loss <- if(tmle_linear) {
-    torch::nn_mse_loss(reduction = "sum")
+    f <- torch::nn_mse_loss(reduction = "sum")
+    function(x, y) 0.5 * f(x, y)
   }
   else {
     torch::nn_bce_with_logits_loss(reduction = "sum")
@@ -43,14 +44,18 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       )
     },
 
+    fluctuation_offset = function(problem, step, state) {
+      if(tmle_linear) state$mu$obs else state$mu$obs$logit()
+    },
+
+    fluctuation_glm = function(problem, step, state, clever) {
+      list(X = as.matrix(clever$obs),
+           offset = as.numeric(clever$offset),
+           target = as.numeric(problem$Yt))
+    },
+
     mu_loss = function(epsilon, problem, step, state, clever) {
-      pred <- if(tmle_linear) {
-        state$mu$obs + clever$obs$matmul(epsilon)
-      }
-      else {
-        state$mu$obs$logit() + clever$obs$matmul(epsilon)
-      }
-      tmle_loss(pred, problem$Yt)
+      tmle_loss(clever$offset + clever$obs$matmul(epsilon), problem$Yt)
     },
 
     apply_update = function(problem, step, state, epsilon, clever, K_Q) {
@@ -61,11 +66,13 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
         arms <- state$mu$arms + arms_lin
       }
       else {
-        obs <- torch::torch_sigmoid(state$mu$obs$logit() + obs_lin)
-        arms <- torch::torch_sigmoid(state$mu$arms$logit() + arms_lin)
+        obs <- clamp_fit(torch::torch_sigmoid(state$mu$obs$logit() + obs_lin), problem$clamp)
+        arms <- clamp_fit(torch::torch_sigmoid(state$mu$arms$logit() + arms_lin), problem$clamp)
       }
       state$mu <- list(obs = obs$detach(), arms = arms$detach())
-      if(isTRUE(step$fluctuate_Q)) state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
+      if(isTRUE(step$fluctuate_Q)) {
+        state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
+      }
       state
     },
 

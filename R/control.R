@@ -8,11 +8,29 @@
 #'
 #' @param enabled Logical; whether to run the TMLE estimator.
 #' @param maxiter Maximum number of outer TMLE iterations.
-#' @param linear Logical; whether to use a linear TMLE fluctuation model
-#'   (\code{TRUE}) or a logistic one (\code{FALSE}). A logistic fluctuation
+#' @param fluctuation whether to use a linear TMLE fluctuation model (\code{"linear"}
+#'   a logistic one (\code{"logistic"}), or pick based on the outcome type (\code{"auto"}; continuous outcomes default to
+#'   linear, and binary outcomes logistic). A logistic fluctuation
 #'   model respects the \eqn{[0, 1]} bounds of a binomial outcome regression and
 #'   is generally preferable when \code{outcome_type = "binomial"}.
-#' @param tol Convergence tolerance on \eqn{\|\epsilon\|_\infty}, the fluctuation parameter.
+#' @param solver Fluctuation solver: \code{"newton"} (default) uses an
+#'   analytic Newton/Iteratively Reweighted Least Squares step, since the fluctuation objective
+#'   is a GLM in \eqn{\epsilon} with a closed-form gradient and Hessian. Alternatively,
+#'   \code{"lbfgs"} uses L-BFGS with a strong-Wolfe line search over the automatically differentiated
+#'   objective. The Newton solver falls back to L-BFGS automatically if it fails or does not decrease
+#'   the objective.
+#' @param criterion Stopping rule: \code{"eif"} (the default) stops when the EIF estimating equation is approximately solved,
+#'   \code{"epsilon"} stops on \eqn{\|\epsilon\|_\infty < \code{tol}}.
+#' @param eif_tol Threshold for the \code{"eif"} criterion, in standard-error units.
+#' @param tol Threshold for the \code{"epsilon"} criterion. Measured on the \eqn{M^{-1}} scale,
+#'   therefore not comparable across problems (this is why \code{"eif"}) is the default).
+#' @param eps_max Largest permitted \eqn{\|epsilon\|_\infty} in a single step.
+#'   Steps exceeding it are scaled back and a warning is issued, which surfaces a
+#'   separated or near-degenerate fluctuation submodel.
+#' @param clamp Bound keeping the fluctuated conditional means in
+#'   \eqn{[\code{clamp}, 1 - \code{clamp}]} under a logistic fluctuation.
+#' @param ridge Relative ridge added to the fluctuation Hessian for numerical stability.
+#' @param obj_tol Relative slack when asserting the solver decreased the objective.
 #'
 #' @return A list of class \code{"automsm_tmle_control"}.
 #' @seealso [bayes_control()], [onestep_control()]
@@ -21,15 +39,43 @@
 tmle_control <- function(
   enabled = TRUE,
   maxiter = 25L,
-  linear = TRUE,
-  tol = NULL
+  fluctuation = c("auto", "linear", "logistic"),
+  solver = c("newton", "lbfgs"),
+  criterion = c("eif", "epsilon"),
+  eif_tol = 1e-2,
+  tol = NULL,
+  eps_max = 25,
+  clamp = 1e-3,
+  ridge = 1e-10,
+  obj_tol = 1e-6
 ) {
+  fluctuation <- match.arg(fluctuation)
+  solver <- match.arg(solver)
+  criterion <- match.arg(criterion)
   checkmate::assert_flag(enabled)
   checkmate::assert_count(maxiter, positive = TRUE)
-  checkmate::assert_flag(linear)
+  checkmate::assert_number(eif_tol, lower = 0, finite = TRUE)
   checkmate::assert_number(tol, lower = 0, finite = TRUE, null.ok = TRUE)
-  structure(list(enabled = enabled, maxiter = as.integer(maxiter), linear = linear, tol = tol), class = "automsm_tmle_control")
+  checkmate::assert_number(eps_max, lower = 0)
+  checkmate::assert_number(clamp, lower = 0, upper = 0.5, null.ok = TRUE)
+  checkmate::assert_number(ridge, lower = 0)
+  checkmate::assert_number(obj_tol, lower = 0)
+
+  structure(list(
+    enabled = enabled,
+    maxiter = as.integer(maxiter),
+    fluctuation = fluctuation,
+    solver = solver,
+    criterion = criterion,
+    eif_tol = eif_tol,
+    tol = tol,
+    eps_max = eps_max,
+    clamp = clamp,
+    ridge = ridge,
+    obj_tol = obj_tol
+  ), class = "automsm_tmle_control")
 }
+
 
 #' Control parameters for the generalied Bayesian TMLE estimator
 #'

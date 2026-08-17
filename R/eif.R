@@ -136,6 +136,19 @@ dB_dQ <- function(Lm, psi, beta, design_matrix, Q, p) {
 normalizing_matrix <- function(Lm, psi, beta, design_matrix, Q, p) {
   n <- dim(design_matrix)[1]
   M <- ddL(Lm, psi, beta, design_matrix, p, Q)
+
+  Mm <- as.matrix(M$detach())
+  k <- kappa(Mm, exact = TRUE)
+
+  if(!is.finite(k) || k > 1e12) {
+    stop("Normalizing matrix M is numerically singular ",
+         "(condition number ", signif(k, 3), "). ",
+         "Check the working-model design for collinearity.", call. = FALSE)
+  }
+  if(k > 1e8) {
+    warning("Normalizing matrix is ill-conditioned (condition number ", signif(k, 3), ").", call. = FALSE)
+  }
+
   torch::torch_tensor(M$inverse())
 }
 
