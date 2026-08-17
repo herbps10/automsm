@@ -252,7 +252,7 @@ test_that("dose_response gradient of the log-loss equals the summed EIF", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_dose_response(data)
   for(tmle_linear in c(FALSE, TRUE)) {
-    it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(linear = tmle_linear))
+    it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
     logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
     g <- autograd_gradient(logf, torch::torch_tensor(rep(0, it$problem$p)))
     se <- it$tmle$se * it$problem$n
@@ -264,7 +264,7 @@ test_that("dose_response eif rows are reproducible from the clever covariates", 
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_dose_response(data)
   for(tmle_linear in c(FALSE, TRUE)) {
-    it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(linear = tmle_linear))
+    it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
     st <- it$fit$state
     fn <- it$fit$final
     cl <- as.matrix(fn$clever$obs)
@@ -278,7 +278,7 @@ test_that("(B2) holds exactly against the conditional variance for dose_response
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_dose_response(data)
   tmle_linear <- FALSE
-  it <- dose_response_internals(data, nu, formula = ~1 + A, tmle = tmle_control(linear = tmle_linear))
+  it <- dose_response_internals(data, nu, formula = ~1 + A, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
   logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
 
   H <- hessian_from_gradient(logf, rep(0, it$problem$p))
@@ -290,7 +290,7 @@ test_that("(B2) holds exactly against the conditional variance for dose_response
 test_that("(B2) holds statistically against the empirical EIF for dose_response", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_dose_response(data)
-  it <- dose_response_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  it <- dose_response_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = "logistic"))
   n <- it$problem$n
   A <- Lhat_theory(it)
   B <- crossprod(as.matrix(it$tmle$eif))

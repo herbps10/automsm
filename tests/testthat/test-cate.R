@@ -266,7 +266,7 @@ test_that("gradient of the log-loss equals the summed EIF", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
   for(tmle_linear in c(FALSE, TRUE)) {
-    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
     logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
     g <- autograd_gradient(logf, torch::torch_tensor(rep(0, it$problem$p)))
     se <- it$tmle$se * it$problem$n
@@ -278,7 +278,7 @@ test_that("eif rows are reproducible from the clever covariates", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
   for(tmle_linear in c(FALSE, TRUE)) {
-    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
     st <- it$fit$state
     fn <- it$fit$final
     cl <- as.matrix(fn$clever$obs)
@@ -292,7 +292,7 @@ test_that("(B2) holds exactly against the conditional variance for cate", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
   tmle_linear <- FALSE
-  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
   logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
 
   H <- hessian_from_gradient(logf, rep(0, it$problem$p))
@@ -304,7 +304,7 @@ test_that("(B2) holds exactly against the conditional variance for cate", {
 test_that("(B2) holds statistically against the empirical EIF for cate", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
-  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = "logistic"))
   n <- it$problem$n
   A <- Lhat_theory(it)
   B <- crossprod(as.matrix(it$tmle$eif))
@@ -321,7 +321,7 @@ test_that("cate generalized posterior with binary outcome concentrates as predic
     formula = ~X4,
     nuisance_estimates = oracle_nuisance_cate(data),
     outcome_type = "binomial",
-    tmle = tmle_control(linear = FALSE),
+    tmle = tmle_control(fluctuation = "logistic"),
     bayes = bayes_control(
       chains = 2,
       warmup = 500,
@@ -347,7 +347,7 @@ test_that("cate generalized posterior with continuous outcome concentrates as pr
     formula = ~X4,
     nuisance_estimates = oracle_nuisance_cate(data),
     outcome_type = "continuous",
-    tmle = tmle_control(linear = TRUE),
+    tmle = tmle_control(),
     bayes = bayes_control(
       chains = 2,
       warmup = 500,
@@ -368,7 +368,7 @@ test_that("analytic GLM agrees with spec$mu_loss (value and gradient)", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
   for(linear in c(TRUE, FALSE)) {
-    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = if(linear) "linear" else "logistic"))
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(linear) "linear" else "logistic"))
 
     problem <- it$problem
     spec <- it$spec
