@@ -68,27 +68,29 @@ fit <- cate(
   "Y",
   formula = ~1 + X2,
   outcome_type = "continuous",
-  learners_trt = c("SL.glm.interaction"),
-  learners_outcome = c("SL.glm.interaction"),
   loss = loss_squared_error,
-  working_model = working_model_linear
+  working_model = working_model_linear,
+  nuisance = nuisance_control(
+    learners_trt = c("SL.glm.interaction"),
+    learners_outcome = c("SL.glm.interaction")
+  )
 )
 #> Loading required package: nnls
 
 summary(fit)
 #> 
-#> ── Targeted MSM: conditional average treatment effect ──────────────────────────
+#> ── automsm: conditional average treatment effect ───────────────────────────────
 #> n = 500
 #> 
 #> ── One-step estimator ──
 #> 
 #>         Term    Est    SE   2.5%  97.5%
-#>  (Intercept)  0.944 0.062  0.823  1.066
-#>           X2 -1.929 0.115 -2.155 -1.704
+#>  (Intercept)  0.209 0.090  0.033  0.385
+#>           X2 -0.383 0.159 -0.694 -0.072
 #> 
 #> ── TMLE estimator ──
 #> 
 #>         Term    Est    SE   2.5%  97.5%
-#>  (Intercept)  0.948 0.062  0.827  1.069
-#>           X2 -1.939 0.115 -2.164 -1.714
+#>  (Intercept)  0.209 0.090  0.033  0.385
+#>           X2 -0.383 0.159 -0.694 -0.072
 ```

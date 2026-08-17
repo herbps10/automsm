@@ -70,10 +70,12 @@ fit <- cate(
   "Y",
   formula = ~1 + X2,
   outcome_type = "continuous",
-  learners_trt = c("SL.glm.interaction"),
-  learners_outcome = c("SL.glm.interaction"),
   loss = loss_squared_error,
-  working_model = working_model_linear
+  working_model = working_model_linear,
+  nuisance = nuisance_control(
+    learners_trt = c("SL.glm.interaction"),
+    learners_outcome = c("SL.glm.interaction")
+  )
 )
 
 summary(fit)
