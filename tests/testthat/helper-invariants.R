@@ -8,7 +8,33 @@ sim1_data <- function(n = 200L, seed = 10016) {
   d$A <- rbinom(n, 1L, d$pi)
   d$mu0 <- plogis(0.5 * d$X2 - 0.5 * d$X3)
   d$mu1 <- plogis(0.5 * d$X2 - 0.5 * d$X3 + 1 + 0.5 * d$X4)
-  d$Y <- rbinom(n, 1L, ifelse(d$A == 1, d$mu1, d$mu0))
+  d$mu <- ifelse(d$A == 1, d$mu1, d$mu0)
+  d$condvar <- d$mu * (1 - d$mu)
+  d$condvar0 <- d$mu0 * (1 - d$mu0)
+  d$condvar1 <- d$mu1 * (1 - d$mu1)
+  d$Y <- rbinom(n, 1L, d$mu)
+  d
+}
+
+# DGP with continuous outcomes and different variance in each arm
+sim2_data <- function(n = 200L, seed = 10016) {
+  set.seed(seed)
+  X <- matrix(rnorm(4 * n), ncol = 4)
+  colnames(X) <- paste0("X", 1:4)
+  d <- as.data.frame(X)
+  d$pi <- plogis(0.5 * d$X1 - 0.5 * d$X2 + 0.2 * d$X3 - 0.1 * d$X4)
+  d$A <- rbinom(n, 1L, d$pi)
+  d$mu0 <- 0.5 * d$X2 - 0.5 * d$X3
+  d$mu1 <- 0.5 * d$X2 - 0.5 * d$X3 + 1 + 0.5 * d$X4
+  d$mu <- ifelse(d$A == 1, d$mu1, d$mu0)
+  d$condvar0 <- 0.1^2
+  d$condvar1 <- 0.25^2
+  d$condvar <- ifelse(d$A == 1, d$condvar1, d$condvar0)
+  d$Y <- rnorm(
+    n,
+    mean = ifelse(d$A == 1, d$mu1, d$mu0),
+    sd = sqrt(ifelse(d$A == 1, d$condvar1, d$condvar0))
+  )
   d
 }
 
@@ -19,7 +45,9 @@ oracle_nuisance_cate <- function(data) {
     mu = mu,
     mu0 = data$mu0,
     mu1 = data$mu1,
-    condvar = mu * (1 - mu)
+    condvar = data$condvar,
+    condvar0 = data$condvar0,
+    condvar1 = data$condvar1
   )
 }
 
@@ -30,7 +58,8 @@ oracle_nuisance_dose_response <- function(data) {
     mu = mu,
     mu_a = cbind(data$mu0, data$mu1),
     pi_a = cbind(1 - data$pi, data$pi),
-    condvar = mu * (1 - mu)
+    condvar = data$condvar,
+    condvar_a = cbind(data$condvar0, data$condvar1)
   )
 }
 

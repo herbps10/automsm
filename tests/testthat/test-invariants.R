@@ -3,7 +3,8 @@
 # These tests assert mathematical properties that must hold for
 # ANY correct implementation.
 
-source(test_path("test-helper-invariants.R"))
+source(test_path("helper-invariants.R"))
+source(test_path("helper-bayes.R"))
 source(test_path("test-internals.R"))
 
 
@@ -342,4 +343,83 @@ test_that("working models with p != d are supported", {
   expect_equal(res$d, 1L)
   expect_length(res$plugin$est, 2L)
   expect_equal(dim(as.matrix(res$onestep$eif)), c(nrow(data), 2L))
+})
+
+test_that("every mu component responds to epsilon, and eps = 0 is identity", {
+  for(linear in c(TRUE, FALSE)) {
+    for(param in c("cate", "dose_response")) {
+      data <- sim1_data(n = 60L, seed = 10016)
+      if(param == "cate") {
+        nu <- oracle_nuisance_cate(data)
+        it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = linear))
+      } else {
+        nu <- oracle_nuisance_dose_response(data)
+        it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(linear = linear))
+      }
+
+      problem <- it$problem
+      spec <- it$spec
+      step <- spec$steps(problem)[[1]]
+      state0 <- it$state0
+
+      # (M1a): fluctuation is identity at epsilon = 0
+
+      z <- spec$apply_update(problem, step, state0, torch::torch_zeros(problem$p), it$clever0, it$K_Q0)
+
+      for(name in names(state0$mu)) {
+        expect_equal(as.array(z$mu[[name]]), as.array(state0$mu[[name]]),
+                     tolerance = 1e-6, info = name)
+      }
+
+      # Every component must actually move.
+      eps <- torch::torch_tensor(rep(0.25, problem$p))
+      s1 <- spec$apply_update(problem, step, state0, eps, it$clever0, it$K_Q0)
+      for(name in names(state0$mu)) {
+        expect_gt(max(abs(as.array(s1$mu[[name]]) - as.array(state0$mu[[name]]))), 1e-1) # mu should move a lot
+      }
+      expect_gt(max(abs(as.numeric(s1$Q) - as.numeric(state0$Q))), 1e-3) # Q might not fluctuate much
+    }
+  }
+})
+
+# ----- generalized Bayes -----
+
+test_that("The Jacobian dbeta/deps equals P0[lambda*]", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  p <- it$problem$p
+  fn <- it$fit$final
+
+  e0 <- torch::torch_tensor(rep(0, p))
+  st <- it$spec$apply_update(it$problem, list(id = 1L, fluctuate_Q = TRUE),
+                             it$fit$state, e0, fn$clever, fn$K_Q)
+
+  psi <- it$spec$psi_from_state(it$problem, st)
+  beta <- B(it$problem$Lm_fn, psi, it$problem$design_matrix, st$Q, p)
+  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0)
+  J <- as.matrix(bayes_jacobian(it$problem, psi, it$fit$state$Q, st$Q, beta, dpsi, e0, fn$K_Q)$detach())
+
+  # Analytical jacobian for CATE + linear working model + squared error loss
+  X   <- cbind(1, data$X4)
+  Sig <- crossprod(X) / n; Si <- solve(Sig)
+  m1  <- as.numeric(st$mu$a1); m0 <- as.numeric(st$mu$a0); pp <- nu$pi
+  w   <- m1 * (1 - m1) / pp + m0 * (1 - m0) / (1 - pp)
+  r   <- (m1 - m0) - as.vector(X %*% it$tmle$est)
+
+  Jpsi_ref <- -Si %*% (crossprod(X * sqrt(w))   / n) %*% Si
+  JQ_ref   <- -Si %*% (crossprod(X * abs(r))    / n) %*% Si
+
+  # Same split from the code, using the include_Q switch
+  e0   <- torch::torch_tensor(rep(0, it$problem$p))
+  psi  <- it$spec$psi_from_state(it$problem, st)
+  beta <- B(it$problem$Lm_fn, psi, it$problem$design_matrix, st$Q, it$problem$p)
+  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0)
+
+  Jpsi <- as.matrix(bayes_jacobian(it$problem, psi, st$Q, st$Q, beta, dpsi, e0,
+                                   fn$K_Q, include_Q = FALSE)$detach())
+  Jall <- as.matrix(bayes_jacobian(it$problem, psi, st$Q, st$Q, beta, dpsi, e0,
+                                   fn$K_Q, include_Q = TRUE)$detach())
+
+  expect_equal(J, Jpsi_ref + JQ_ref, tolerance = 5e-3, ignore_attr = TRUE)
 })

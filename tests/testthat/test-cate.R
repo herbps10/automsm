@@ -1,3 +1,5 @@
+source(test_path("helper-bayes.R"))
+
 # ----- One-step fixtures -----
 test_that("cate continous linear one-step fixture is stable", {
   fx <- readRDS(test_path("fixtures", "cate_continuous_linear.rds"))
@@ -11,7 +13,7 @@ test_that("cate continous linear one-step fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "continuous",
     tmle = FALSE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-6)
@@ -30,7 +32,7 @@ test_that("cate continous binary one-step fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "binomial",
     tmle = FALSE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-6)
@@ -51,7 +53,7 @@ test_that("cate continous linear TMLE fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "continuous",
     tmle = TRUE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-5)
@@ -69,7 +71,7 @@ test_that("cate continous binary TMLE fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "binomial",
     tmle = TRUE,,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-3)
@@ -81,7 +83,7 @@ test_that("cate continous linear Bayes TMLE fixture is stable", {
   fx <- readRDS(test_path("fixtures", "cate_continuous_linear.rds"))
 
   set.seed(1)
-  fit <- cate(
+  fit <- suppressWarnings(cate(
     fx$dat,
     c("X1", "X2"),
     "A",
@@ -89,18 +91,22 @@ test_that("cate continous linear Bayes TMLE fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "continuous",
     tmle = TRUE,
-    bayes = bayes_control(chains = 2, draws = 100),
-    nuisance_estimates = fx$nuisance
-  )
+    bayes = bayes_control(
+      chains = 2,
+      draws = 100,
+      warmup = 100
+    ),
+    nuisance_estimates = fx$nuisance_estimates
+  ))
 
   expect_equal(
-    apply(fit$bayes_tmle$samples, 3, mean),
-    apply(fx$fit_bayes$bayes_tmle$samples, 3, mean),
+    apply(fit$bayes_tmle$draws, 3, mean),
+    apply(fx$fit_bayes$bayes_tmle$draws, 3, mean),
     tolerance = 1e-4
   )
   expect_equal(
-    apply(fit$bayes_tmle$samples, 3, sd),
-    apply(fx$fit_bayes$bayes_tmle$samples, 3, sd),
+    apply(fit$bayes_tmle$draws, 3, sd),
+    apply(fx$fit_bayes$bayes_tmle$draws, 3, sd),
     tolerance = 1e-4
   )
   expect_equal(fit$bayes_tmle$acc_rate, fx$fit_bayes$bayes_tmle$acc_rate, tolerance = 1e-4)
@@ -110,7 +116,7 @@ test_that("cate continous binary Bayes TMLE fixture is stable", {
   fx <- readRDS(test_path("fixtures", "cate_binary_linear.rds"))
 
   set.seed(1)
-  fit <- cate(
+  fit <- suppressWarnings(cate(
     fx$dat,
     c("X1", "X2"),
     "A",
@@ -118,21 +124,71 @@ test_that("cate continous binary Bayes TMLE fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "binomial",
     tmle = TRUE,
-    bayes = bayes_control(chains = 2, draws = 100),
-    nuisance_estimates = fx$nuisance
-  )
+    bayes = bayes_control(chains = 2, draws = 100, warmup = 100),
+    nuisance_estimates = fx$nuisance_estimates
+  ))
 
   expect_equal(
-    apply(fit$bayes_tmle$samples, 3, mean),
-    apply(fx$fit_bayes$bayes_tmle$samples, 3, mean),
+    apply(fit$bayes_tmle$draws, 3, mean),
+    apply(fx$fit_bayes$bayes_tmle$draws, 3, mean),
     tolerance = 1e-3
   )
   expect_equal(
-    apply(fit$bayes_tmle$samples, 3, sd),
-    apply(fx$fit_bayes$bayes_tmle$samples, 3, sd),
+    apply(fit$bayes_tmle$draws, 3, sd),
+    apply(fx$fit_bayes$bayes_tmle$draws, 3, sd),
     tolerance = 1e-3
   )
   expect_equal(fit$bayes_tmle$acc_rate, fx$fit_bayes$bayes_tmle$acc_rate, tolerance = 1e-4)
+})
+
+# ---- Bayes -----
+test_that("cate bayes posterior is a well-formed posterior::draws object", {
+  data <- sim1_data(n = 200L)
+  suppressWarnings(fit <- cate(
+    data,
+    X = paste0("X", 1:4), A = "A", Y = "Y",
+    formula = ~X4,
+    nuisance_estimates = oracle_nuisance_cate(data),
+    bayes = bayes_control(
+      chains = 2,
+      draws = 50,
+      warmup = 50
+    )
+  ))
+
+  d <- posterior::as_draws_array(fit)
+
+  # Check the layout
+  expect_equal(posterior::niterations(d), 50)
+  expect_equal(posterior::nchains(d), 2)
+  expect_equal(posterior::nvariables(d), fit$p)
+  expect_equal(posterior::variables(d), sprintf("beta[%d]", seq_len(fit$p)))
+
+  expect_s3_class(fit$bayes_tmle$diagnostics, "draws_summary")
+  expect_equal(nrow(fit$bayes_tmle$diagnostics), fit$p)
+  expect_true(all(is.finite(array(d))))
+
+  rv <- posterior::as_draws_rvars(fit)
+  expect_named(rv, "beta")
+  expect_equal(length(rv$beta), fit$p)
+
+  expect_equal(nrow(posterior::summarize_draws(fit)), fit$p)
+
+  e <- posterior::as_draws_array(fit, parameter = "epsilon")
+  expect_true("lp__" %in% posterior::variables(e))
+})
+
+test_that("cate as_draws() errors informatively without a Bayesian fit", {
+  data <- sim1_data(n = 100L)
+
+  suppressWarnings(fit <- cate(
+    data,
+    X = paste0("X", 1:4), A = "A", Y = "Y",
+    formula = ~X4,
+    nuisance_estimates = oracle_nuisance_cate(data),
+    bayes = FALSE
+  ))
+  expect_error(posterior::as_draws_array(fit), "no generalized Bayesian posterior")
 })
 
 # ----- Integration tests -----
@@ -181,7 +237,7 @@ test_that("cate TMLE runs on continuous linear simulated data", {
 test_that("cate Bayes TMLE runs on continuous linear simulated data", {
   dat <- simulate_cate(N = 500, sigma = 0.1, seed = 1, nonlinear = FALSE, binary = FALSE)
   set.seed(1)
-  fit <- cate(
+  fit <- suppressWarnings(cate(
     dat,
     c("X1", "X2"),
     "A",
@@ -192,11 +248,116 @@ test_that("cate Bayes TMLE runs on continuous linear simulated data", {
     ),
     formula = ~1 + X2,
     tmle = TRUE,
-    bayes = bayes_control(chains = 2, draws = 100),
-  )
+    bayes = bayes_control(
+      chains = 2,
+      draws = 50,
+      warmup = 50
+    )
+  ))
 
-  expect_equal(dim(fit$bayes_tmle$samples), c(2, 100, 2))
-  expect_true(all(is.finite(fit$bayes_tmle$samples)))
+  expect_equal(dim(fit$bayes_tmle$draws), c(50, 2, 2))
+  expect_true(all(is.finite(fit$bayes_tmle$draws)))
   expect_true(is.finite(fit$bayes_tmle$acc_rate))
+})
+
+test_that("gradient of the log-loss equals the summed EIF", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  for(tmle_linear in c(FALSE, TRUE)) {
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+    logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+    g <- autograd_gradient(logf, torch::torch_tensor(rep(0, it$problem$p)))
+    se <- it$tmle$se * it$problem$n
+    expect_lt(max(abs(abs(g) - abs(colSums(it$tmle$eif))) / se), 1e-3)
+  }
+})
+
+test_that("eif rows are reproducible from the clever covariates", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  for(tmle_linear in c(FALSE, TRUE)) {
+    it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+    st <- it$fit$state
+    fn <- it$fit$final
+    cl <- as.matrix(fn$clever$obs)
+    K <- as.matrix(fn$K_Q)
+    resid <- as.numeric(it$problem$Yt) - as.numeric(st$mu$obs)
+    expect_equal(abs(as.matrix(it$tmle$eif)), abs(resid * cl + K), tolerance = 1e-4)
+  }
+})
+
+test_that("(B2) holds exactly against the conditional variance for cate", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  tmle_linear <- FALSE
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = tmle_linear))
+  logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+
+  H <- hessian_from_gradient(logf, rep(0, it$problem$p))
+  expect_lt(attr(H, "asymmetry"), 1e-4)
+
+  expect_equal(-H, Lhat_theory(it), tolerance = 1e-3, ignore_attr = TRUE)
+})
+
+test_that("(B2) holds statistically against the empirical EIF for cate", {
+  data <- sim1_data(n = 500L)
+  nu <- oracle_nuisance_cate(data)
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  n <- it$problem$n
+  A <- Lhat_theory(it)
+  B <- crossprod(as.matrix(it$tmle$eif))
+  R <- solve(chol(A))
+  R <- t(R) %*% B %*% R
+  expect_lt(max(abs(R - diag(nrow(R)))), 10 / sqrt(n))
+})
+
+test_that("cate generalized posterior with binary outcome concentrates as predicted by BvM", {
+  data <- sim1_data(n = 1e3L)
+  suppressWarnings(fit <- cate(
+    data,
+    X = paste0("X", 1:4), A = "A", Y = "Y",
+    formula = ~X4,
+    nuisance_estimates = oracle_nuisance_cate(data),
+    outcome_type = "binomial",
+    tmle = tmle_control(linear = FALSE),
+    bayes = bayes_control(
+      chains = 2,
+      warmup = 500,
+      draws = 500,
+      seed = 101
+    )
+  ))
+
+  fit$bayes_tmle$acc_rate_by_chain
+
+  s <- fit$bayes_tmle$diagnostics
+
+  expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
+  expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
+  expect_true(all(s$rhat < 1.05))
+})
+
+test_that("cate generalized posterior with continuous outcome concentrates as predicted by BvM", {
+  data <- sim2_data(n = 500L)
+  suppressWarnings(fit <- cate(
+    data,
+    X = paste0("X", 1:4), A = "A", Y = "Y",
+    formula = ~X4,
+    nuisance_estimates = oracle_nuisance_cate(data),
+    outcome_type = "continuous",
+    tmle = tmle_control(linear = TRUE),
+    bayes = bayes_control(
+      chains = 2,
+      warmup = 500,
+      draws = 1e3,
+      seed = 101
+    )
+  ))
+
+  s <- fit$bayes_tmle$diagnostics
+
+  expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
+  expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
+  expect_true(all(s$rhat < 1.05))
 })
 

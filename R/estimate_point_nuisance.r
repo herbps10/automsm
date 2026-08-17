@@ -32,8 +32,7 @@ estimate_point_nuisance <- function(
     stop("Some observed values of `", A, "` are not present in `levels`.")
   }
 
-  pi_a_hat <- mu_a_hat <- matrix(0, n, K)
-  condvar_hat <- numeric(n)
+  pi_a_hat <- mu_a_hat <- condvar_a_hat <- matrix(0, n, K)
 
   for (fold in seq_along(setup$cv)) {
     train <- setup$cv[[fold]]$training_set
@@ -101,21 +100,24 @@ estimate_point_nuisance <- function(
       yvar <- sl_fit_predict(
         Y = y2,
         X = data[train, c(X, A), drop = FALSE],
-        newdata = list(valid = data[valid, c(X, A), drop = FALSE]),
+        newdata = newdata,
         SL.library = control$learners_outcome,
         family = setup$outcome_family,
         cv_control = setup$cv_control
       )
 
-      condvar_hat[valid] <- ifelse(yvar$pred$valid < control$epsilon, control$epsilon, yvar$pred$valid)
+      for(k in seq_len(K)) {
+        condvar_a_hat[valid, k] <- ifelse(yvar$pred[[k]] < control$epsilon, control$epsilon, yvar$pred[[k]])
+      }
     }
   }
 
   # ------ Observed-arm nuisances -----
-  mu_hat <- pi_obs_hat <- numeric(n)
+  mu_hat <- pi_obs_hat <- condvar_hat <- numeric(n)
   for (k in seq_len(K)) {
     ind <- data[[A]] == levels[k]
     mu_hat[ind] <- mu_a_hat[ind, k]
+    condvar_hat[ind] <- condvar_a_hat[ind, k]
     pi_obs_hat[ind] <- pi_a_hat[ind, k]
   }
 
@@ -127,6 +129,7 @@ estimate_point_nuisance <- function(
     pi_obs = pi_obs_hat,   # x:     P(A = A_i | X)
     mu_a = mu_a_hat,       # n x K: E[Y | A = levels[k], X]
     mu = mu_hat,           # n:     E[Y | A = A_i, X]
+    condvar_a = condvar_a_hat,
     condvar = condvar_hat
   )
 }

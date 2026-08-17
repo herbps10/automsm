@@ -133,11 +133,12 @@ estimate_dose_response_nuisance <- function(
   ))
 
   list(
-    pi_a    = nuis$pi_a,
-    mu_a    = nuis$mu_a,
-    mu      = nuis$mu,
-    pi      = nuis$pi_obs,
-    condvar = nuis$condvar
+    pi_a      = nuis$pi_a,
+    mu_a      = nuis$mu_a,
+    mu        = nuis$mu,
+    pi        = nuis$pi_obs,
+    condvar_a = nuis$condvar_a,
+    condvar   = nuis$condvar
   )
 }
 

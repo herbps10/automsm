@@ -61,7 +61,7 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
         arms <- state$mu$arms + arms_lin
       }
       else {
-        obs <- torch::torch_sigmoid(state$mu$obs$logit())
+        obs <- torch::torch_sigmoid(state$mu$obs$logit() + obs_lin)
         arms <- torch::torch_sigmoid(state$mu$arms$logit() + arms_lin)
       }
       state$mu <- list(obs = obs$detach(), arms = arms$detach())
@@ -88,15 +88,26 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       })
     },
 
+    bayes_clever_scale = function(problem, state) {
+      if(tmle_linear == FALSE) return(NULL)
+
+      nu <- problem$nuisance_estimates
+      list(
+        obs = as_float_tensor(nu$condvar),
+        arms = as_float_tensor(nu$condvar_a)
+      )
+    },
+
     bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar) {
+      logQ <- Q_eps$log()$sum()
       if(tmle_linear) {
         pred <- state$mu$obs + clever$obs$matmul(epsilon)
         stopifnot(!is.null(condvar))
-        as.numeric(-((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(Q_eps$log()$sum())
+        -((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum() + logQ
       }
       else {
         lg <- state$mu$obs$logit() + clever$obs$matmul(epsilon)
-        -as.numeric(tmle_loss(lg, problem$Yt)) + as.numeric(Q_eps$log()$sum())
+        -tmle_loss(lg, problem$Yt) + logQ
       }
     },
 
@@ -110,8 +121,8 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
           nuisance_field("pi", n, lower = 0, upper = 1),
           nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu_a", c(n, K), lower = b$lo, upper = b$hi, severity = "warning"),
-          nuisance_field("mu_a", c(n, K), lower = 0, 1),
-          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear)
+          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear),
+          nuisance_field("condvar_a", c(n, K), required = bayes_enabled && tmle_linear)
         ),
         checks = list(
           function(nu, problem) {
@@ -126,6 +137,10 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
           function(nu, problem) {
             idx <- cbind(seq_len(problem$n), problem$aux$A_index)
             if(max(abs(nu$mu - as.matrix(nu$mu_a)[idx])) < 1e-6) TRUE else "nuisance$mu must equal mu_a[i, k] where As[k] == A[i]."
+          },
+          function(nu, problem) {
+            idx <- cbind(seq_len(problem$n), problem$aux$A_index)
+            if(max(abs(nu$condvar - as.matrix(nu$condvar_a)[idx])) < 1e-6) TRUE else "nuisance$condvar must equal condvar_a[i, k] where As[k] == A[i]."
           }
         )
       )

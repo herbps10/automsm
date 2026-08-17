@@ -7,10 +7,13 @@
 bayes_control(
   enabled = TRUE,
   draws = 1000,
+  warmup = 1000,
   chains = 4L,
   prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
-  scale = 0.001,
-  acc_rate = 0.3
+  scale = NULL,
+  acc_rate = 0.3,
+  seed = NULL,
+  labels = c("index", "terms")
 )
 }
 \arguments{
@@ -18,15 +21,25 @@ bayes_control(
 
 \item{draws}{Number of MCMC draws retained per chain.}
 
+\item{warmup}{Number of initial adaption draws.}
+
 \item{chains}{Number of MCMC chains.}
 
 \item{prior}{A function taking the numeric vector of working-model coefficients \eqn{\beta}
 (of length \code{p}) and returning a scalar log-density. Defaults to independent standard normals.}
 
-\item{scale}{Proposal scale for the adaptive random-walk sampler. Either a single number, recycled across
-coefficients, or a numeric vector of length \code{p}.}
+\item{scale}{Initial proposal covariance for the adaptive sampler. If \code{NULL} (the default),
+it is derived from the estimated efficient influence function. Supply a scalar or
+length-\eqn{p} vector of variances, or a \eqn{p \times p} covariance matrix to override the default.
+Note that this is only for the initial proposal; the sampler adapts toward \code{acc_rate}
+during warmup.}
 
 \item{acc_rate}{Target acceptance rate for the adaptive sampler.}
+
+\item{seed}{Integer; optional random seed for MCMC algorithm}
+
+\item{labels}{How to label posterior parameters: \code{"index"} to label by index, or \code{"terms"} to
+use the terms from the working model formula}
 }
 \value{
 A list of class \code{"automsm_bayes_control"}.

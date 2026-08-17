@@ -30,8 +30,11 @@ the estimated efficient influence function (\code{eif}), and draws from the join
 (\code{joint_draws}).}
 \item{tmle}{List with the same fields as \code{onestep} plus \code{converged} (logical) and \code{iter} (TMLE iterations used). \code{NULL}
 if the TMLE was not run.}
-\item{bayes_tmle}{List with posterior draws for \eqn{beta} (\code{samples}), a \code{chains} by \code{draws} by \code{p} array and
-the mean acceptance rate (\code{acc_rate}). \code{NULL} if the generalized Bayesian estimator was not run.}
+\item{bayes_tmle}{List with posterior draws for \eqn{\beta} (\code{draws}) and posterior draws for \eqn{\epsilon}
+(\code{epsilon_draws}). Posterior summaries and diagnostics are returned in \code{diagnostics}.
+The mean acceptance rate is in \code{acc_rate}, and the per chain
+acceptance rates in \code{acc_rate_by_chain}. The number of warmup draws used in the adaption phase is
+\code{warmup}. Set to \code{NULL} if the generalized Bayesian estimator was not run.}
 }
 }
 

@@ -11,6 +11,7 @@ new_msm_spec <- function(
   supports_bayes = FALSE,
   bayes_loglik = NULL, dpsi_depsilon = NULL,
   nuisance_contract = NULL,
+  bayes_clever_scale = function(problem, state) NULL,
   sweep_criterion = default_sweep_criterion
 ) {
   spec <- list(
@@ -22,6 +23,7 @@ new_msm_spec <- function(
     nan_guard = nan_guard,
     supports_bayes = supports_bayes,
     bayes_loglik = bayes_loglik, dpsi_depsilon = dpsi_depsilon,
+    bayes_clever_scale = bayes_clever_scale,
     nuisance_contract = nuisance_contract
   )
 
@@ -35,8 +37,12 @@ default_sweep_criterion <- function(eps_list) {
 }
 
 validate_spec <- function(spec) {
-  fns <- c("init_state", "steps", "psi_from_state", "make_clever", "mu_loss", "apply_update", "delta", "sweep_criterion", "nuisance_contract")
+  fns <- c("init_state", "steps", "psi_from_state", "make_clever",
+           "mu_loss", "apply_update", "delta", "sweep_criterion",
+           "bayes_clever_scale", "nuisance_contract")
+
   for(f in fns) checkmate::assert_function(spec[[f]], .var.name = f)
+
   checkmate::assert_number(spec$tol, lower = 0, finite = TRUE)
   checkmate::assert_flag(spec$supports_bayes)
   if(spec$supports_bayes) {

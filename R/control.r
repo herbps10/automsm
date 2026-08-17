@@ -47,12 +47,19 @@ tmle_control <- function(
 #'
 #' @param enabled Logical; whether to run the generalized Bayesian TMLE estimator.
 #' @param draws Number of MCMC draws retained per chain.
+#' @param warmup Number of initial adaption draws.
 #' @param chains Number of MCMC chains.
 #' @param prior A function taking the numeric vector of working-model coefficients \eqn{\beta}
 #'   (of length \code{p}) and returning a scalar log-density. Defaults to independent standard normals.
-#' @param scale Proposal scale for the adaptive random-walk sampler. Either a single number, recycled across
-#'   coefficients, or a numeric vector of length \code{p}.
+#' @param scale Initial proposal covariance for the adaptive sampler. If \code{NULL} (the default),
+#'   it is derived from the estimated efficient influence function. Supply a scalar or
+#'   length-\eqn{p} vector of variances, or a \eqn{p \times p} covariance matrix to override the default.
+#'   Note that this is only for the initial proposal; the sampler adapts toward \code{acc_rate}
+#'   during warmup.
 #' @param acc_rate Target acceptance rate for the adaptive sampler.
+#' @param seed Integer; optional random seed for MCMC algorithm
+#' @param labels How to label posterior parameters: \code{"index"} to label by index, or \code{"terms"} to
+#'   use the terms from the working model formula
 #' @return A list of class \code{"automsm_bayes_control"}.
 #' @seealso [tmle_control()], [onestep_control()]
 #' @family automsm control
@@ -60,18 +67,32 @@ tmle_control <- function(
 bayes_control <- function(
   enabled = TRUE,
   draws = 1e3,
+  warmup = 1e3,
   chains = 4L,
   prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
-  scale = 1e-3,
-  acc_rate = 0.3
+  scale = NULL,
+  acc_rate = 0.3,
+  seed = NULL,
+  labels = c("index", "terms")
 ) {
+  labels <- match.arg(labels)
   checkmate::assert_flag(enabled)
   checkmate::assert_count(draws, positive = TRUE)
+  checkmate::assert_count(warmup, positive = TRUE)
   checkmate::assert_count(chains, positive = TRUE)
   checkmate::assert_function(prior)
-  checkmate::assert_numeric(scale, lower = 0, any.missing = FALSE, min.len = 1L)
+  checkmate::assert_numeric(scale, lower = 0, any.missing = FALSE, min.len = 1L, null.ok = TRUE)
   checkmate::assert_number(acc_rate ,lower = 0, upper = 1)
-  structure(list(enabled = enabled, draws = draws, chains = as.integer(chains), prior = prior, scale = scale, acc_rate = acc_rate), class = "automsm_bayes_control")
+  checkmate::assert_choice(labels, choices = c("index", "terms"))
+  structure(list(
+    enabled = enabled,
+    draws = draws,
+    warmup = warmup,
+    chains = as.integer(chains),
+    prior = prior,
+    scale = scale,
+    acc_rate = acc_rate
+  ), class = "automsm_bayes_control")
 }
 
 #' Control parameters for the one-step estimator

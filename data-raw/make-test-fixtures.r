@@ -10,18 +10,20 @@ make_cate_fixture <- function(path, binary, nonlinear) {
   outcome_type <- if(isTRUE(binary)) "binomial" else "continuous"
 
   set.seed(1)
-  nuisance <- estimate_cate_nuisance(
+  nuisance_estimates <- estimate_cate_nuisance(
     data = dat,
     X = c("X1", "X2"),
     A = "A",
     Y = "Y",
-    learners_trt = "SL.glm.interaction",
-    learners_outcome = "SL.glm.interaction",
-    outer_folds = 2,
-    inner_folds = 2,
+    control = nuisance_control(
+      learners_trt = "SL.glm.interaction",
+      learners_outcome = "SL.glm.interaction",
+      outer_folds = 2,
+      inner_folds = 2,
+      epsilon = 1e-5
+    ),
     outcome_type = outcome_type,
-    estimate_conditional_variance = (outcome_type == "continuous"),
-    epsilon = 1e-5
+    estimate_conditional_variance = (outcome_type == "continuous")
   )
 
   fit_onestep <- cate(
@@ -32,7 +34,7 @@ make_cate_fixture <- function(path, binary, nonlinear) {
     formula = ~1 + X2,
     outcome_type = outcome_type,
     tmle = FALSE,
-    nuisance = nuisance
+    nuisance_estimates = nuisance_estimates
   )
 
   fit_tmle <- cate(
@@ -43,7 +45,7 @@ make_cate_fixture <- function(path, binary, nonlinear) {
     formula = ~1 + X2,
     outcome_type = outcome_type,
     tmle = TRUE,
-    nuisance = nuisance
+    nuisance_estimates = nuisance_estimates
   )
 
   set.seed(1)
@@ -55,16 +57,98 @@ make_cate_fixture <- function(path, binary, nonlinear) {
     formula = ~1 + X2,
     outcome_type = outcome_type,
     tmle = TRUE,
-    bayes = TRUE,
-    bayes_chains = 2,
-    bayes_draws = 100,
-    nuisance = nuisance
+    bayes = bayes_control(
+      chains = 2,
+      draws = 100,
+      warmup = 100
+    ),
+    nuisance_estimates = nuisance_estimates
   )
 
   saveRDS(
     list(
       dat = dat,
-      nuisance = nuisance,
+      nuisance_estimates = nuisance_estimates,
+      fit_onestep = fit_onestep,
+      fit_tmle = fit_tmle,
+      fit_bayes = fit_bayes
+    ),
+    path
+  )
+}
+
+make_dose_response_fixture <- function(path, binary, nonlinear) {
+  dat <- simulate_dose_response(
+    N = 500,
+    sigma = 0.1,
+    seed = 1,
+    treatments = 6,
+    nonlinear = nonlinear,
+    binary = binary
+  )
+
+  outcome_type <- if(isTRUE(binary)) "binomial" else "continuous"
+
+  set.seed(1)
+  nuisance_estimates <- estimate_dose_response_nuisance(
+    data = dat,
+    X = c("X1", "X2"),
+    A = "A",
+    Y = "Y",
+    control = nuisance_control(
+      learners_trt = "SL.glm.interaction",
+      learners_outcome = "SL.glm.interaction",
+      outer_folds = 2,
+      inner_folds = 2,
+      epsilon = 1e-5
+    ),
+    outcome_type = outcome_type,
+    estimate_conditional_variance = (outcome_type == "continuous")
+  )
+
+  fit_onestep <- dose_response(
+    dat,
+    c("X1", "X2"),
+    "A",
+    "Y",
+    formula = ~1 + X2,
+    outcome_type = outcome_type,
+    tmle = FALSE,
+    nuisance_estimates = nuisance_estimates
+  )
+
+  fit_tmle <- dose_response(
+    dat,
+    c("X1", "X2"),
+    "A",
+    "Y",
+    formula = ~1 + X2,
+    outcome_type = outcome_type,
+    tmle = TRUE,
+    nuisance_estimates = nuisance_estimates
+  )
+
+  set.seed(1)
+  fit_bayes <- dose_response(
+    dat,
+    c("X1", "X2"),
+    "A",
+    "Y",
+    formula = ~1 + X2,
+    outcome_type = outcome_type,
+    tmle = TRUE,
+    bayes = bayes_control(
+      chains = 2,
+      draws = 100,
+      warmup = 100
+    ),
+    nuisance_estimates = nuisance_estimates
+  )
+
+  saveRDS(
+    list(
+      dat = dat,
+      nuisance_estimates = nuisance_estimates,
       fit_onestep = fit_onestep,
       fit_tmle = fit_tmle,
       fit_bayes = fit_bayes
@@ -90,19 +174,20 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
   colnames(regimes) <- As
 
   set.seed(1)
-  nuisance <- estimate_longitudinal_dose_response_nuisance(
+  nuisance_estimates <- estimate_longitudinal_dose_response_nuisance(
     data = dat,
     Ls = Ls,
     As = As,
     Y = "Y",
     regimes = regimes,
-    learners_trt = "SL.glm.interaction",
-    learners_outcome = "SL.glm.interaction",
-    outer_folds = 2,
-    inner_folds = 2,
-    outcome_type = outcome_type,
-    epsilon = 1e-5,
-    cv = NULL
+    control = nuisance_control(
+      learners_trt = "SL.glm.interaction",
+      learners_outcome = "SL.glm.interaction",
+      outer_folds = 2,
+      inner_folds = 2,
+      epsilon = 1e-5,
+    ),
+    outcome_type = outcome_type
   )
 
   loss <- if(outcome_type == "continuous") loss_squared_error else loss_cross_entropy_logit
@@ -118,7 +203,7 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
     loss = loss,
     outcome_type = outcome_type,
     tmle = FALSE,
-    nuisance = nuisance
+    nuisance_estimates = nuisance_estimates
   )
 
   set.seed(1)
@@ -133,13 +218,13 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
     loss = loss,
     outcome_type = outcome_type,
     tmle = TRUE,
-    nuisance = nuisance
+    nuisance_estimates = nuisance_estimates
   )
 
   saveRDS(
     list(
       dat = dat,
-      nuisance = nuisance,
+      nuisance_estimates = nuisance_estimates,
       fit_onestep = fit_onestep,
       fit_tmle = fit_tmle,
       tau = tau,

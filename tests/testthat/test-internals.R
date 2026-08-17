@@ -59,7 +59,7 @@ dose_response_internals <- function(
   msm_internals(problem, automsm:::msm_spec_dose_response(tmle_linear = tmle$linear), tmle, bayes, onestep, ...)
 }
 
-source(test_path("test-helper-invariants.R"))
+source(test_path("helper-invariants.R"))
 
 test_that("internals helpers agree with exported wrappers", {
   data <- sim1_data(n = 150L)

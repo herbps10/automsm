@@ -49,8 +49,8 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       d <- clever_directions(problem, psi, state$beta, Minv)$reshape(c(n, problem$p))
       list(
         obs = d * problem$aux$H$reshape(c(n, 1)),
-        a0 = d * problem$aux$H0$reshape(c(n, 1)),
-        a1 = d * problem$aux$H1$reshape(c(n, 1))
+        a0  = d * problem$aux$H0$reshape(c(n, 1)),
+        a1  = d * problem$aux$H1$reshape(c(n, 1))
       )
     },
 
@@ -83,7 +83,7 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       (problem$aux$H * (problem$Yt - state$mu$obs[, 1]))$reshape(c(problem$n, 1))
     },
 
-    dpsi_depsilon <- function(problem, state, clever, epsilon) {
+    dpsi_depsilon = function(problem, state, clever, epsilon) {
       n <- problem$n
       if(tmle_linear) {
         list(clever$a1 - clever$a0)
@@ -95,16 +95,27 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       }
     },
 
-    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar) {
-      pred <- state$mu$obs[, 1] + clever$obs$matmul(epsilon)
+    bayes_clever_scale = function(problem, state) {
+      if(tmle_linear == FALSE) return(NULL)
 
+      nu <- problem$nuisance_estimates
+      list(
+        obs = as_float_tensor(nu$condvar),
+        a0 = as_float_tensor(nu$condvar0),
+        a1 = as_float_tensor(nu$condvar1)
+      )
+    },
+
+    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar) {
+      logQ <- Q_eps$log()$sum()
       if(tmle_linear) {
         stopifnot(!is.null(condvar))
-        as.numeric(-((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum()) + as.numeric(Q_eps$log()$sum())
+        pred <- state$mu$obs[, 1] + clever$obs$matmul(epsilon)
+        -((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum() + logQ
       }
       else {
-        lg <- state$mu$obs[, ]$logit() + clever$obs$matmul(epsilon)
-        -as.numeric(tmle_loss(lg, problem$Yt)) + as.numeric(Q_eps$log()$sum())
+        lg <- state$mu$obs[, 1]$logit() + clever$obs$matmul(epsilon)
+        -tmle_loss(lg, problem$Yt) + logQ
       }
     },
 
@@ -118,12 +129,18 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
           nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu0", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu1", n, lower = b$lo, upper = b$hi, severity = "warning"),
-          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear)
+          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear),
+          nuisance_field("condvar0", n, required = bayes_enabled && tmle_linear),
+          nuisance_field("condvar1", n, required = bayes_enabled && tmle_linear)
         ),
         checks = list(
           function(nu, problem) {
             expect <- ifelse(problem$aux$A_obs == 1, nu$mu1, nu$mu0)
             if(max(abs(nu$mu - expect)) < 1e-6) TRUE else "nuisance$mu must equal mu1 where A == 1 and mu0 where A == 0."
+          },
+          function(nu, problem) {
+            expect <- ifelse(problem$aux$A_obs == 1, nu$condvar1, nu$condvar0)
+            if(max(abs(nu$condvar - expect)) < 1e-6) TRUE else "nuisance$condvar must equal condvar1 where A == 1 and condvar0 where A == 0."
           }
         )
       )

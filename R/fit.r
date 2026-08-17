@@ -31,7 +31,9 @@ fit_msm <- function(problem, spec,
     tmle_res <- finalize_tmle(problem, spec, fit)
   }
 
-  bayes_res <- if(bayes$enabled) run_bayes_tmle(problem, spec, fit, bayes) else NULL
+  bayes_res <- if(bayes$enabled) {
+    run_bayes_tmle(problem, spec, fit, bayes, eif = tmle_res$eif)
+  } else NULL
 
   list(base = base, fit = fit, tmle = tmle_res, bayes = bayes_res, state0 = state0)
 }

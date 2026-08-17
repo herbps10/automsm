@@ -14,7 +14,7 @@ test_that("dose_response continous one-step fixture is stable", {
     loss = loss_squared_error,
     outcome_type = "continuous",
     tmle = FALSE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-3)
@@ -36,7 +36,7 @@ test_that("dose_response binary one-step fixture is stable", {
     loss = loss_cross_entropy_logit,
     outcome_type = "binomial",
     tmle = FALSE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-3)
@@ -59,7 +59,7 @@ test_that("dose_response continous linear TMLE fixture is stable", {
     loss = loss_squared_error,
     outcome_type = "continuous",
     tmle = TRUE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-3)
@@ -80,7 +80,7 @@ test_that("dose_response continous binary TMLE fixture is stable", {
     loss = loss_cross_entropy_logit,
     outcome_type = "binomial",
     tmle = TRUE,
-    nuisance_estimates = fx$nuisance
+    nuisance_estimates = fx$nuisance_estimates
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-3)

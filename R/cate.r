@@ -110,11 +110,13 @@ estimate_cate_nuisance <- function(
   ))
 
   list(
-    pi      = nuis$pi_a[, 2],
-    mu0     = nuis$mu_a[, 1],
-    mu1     = nuis$mu_a[, 2],
-    mu      = nuis$mu,
-    condvar = nuis$condvar
+    pi       = nuis$pi_a[, 2],
+    mu0      = nuis$mu_a[, 1],
+    mu1      = nuis$mu_a[, 2],
+    mu       = nuis$mu,
+    condvar0 = nuis$condvar_a[, 1],
+    condvar1 = nuis$condvar_a[, 2],
+    condvar  = nuis$condvar
   )
 }
 
