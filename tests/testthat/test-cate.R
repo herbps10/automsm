@@ -304,7 +304,7 @@ test_that("(B2) holds exactly against the conditional variance for cate", {
 test_that("(B2) holds statistically against the empirical EIF for cate", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
-  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = "logistic"))
   n <- it$problem$n
   A <- Lhat_theory(it)
   B <- crossprod(as.matrix(it$tmle$eif))
@@ -347,7 +347,7 @@ test_that("cate generalized posterior with continuous outcome concentrates as pr
     formula = ~X4,
     nuisance_estimates = oracle_nuisance_cate(data),
     outcome_type = "continuous",
-    tmle = tmle_control(linear = TRUE),
+    tmle = tmle_control(),
     bayes = bayes_control(
       chains = 2,
       warmup = 500,

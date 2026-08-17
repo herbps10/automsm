@@ -387,7 +387,7 @@ test_that("every mu component responds to epsilon, and eps = 0 is identity", {
 test_that("The Jacobian dbeta/deps equals P0[lambda*]", {
   data <- sim1_data(n = 500L)
   nu <- oracle_nuisance_cate(data)
-  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(linear = FALSE))
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = "logistic"))
   n <- it$problem$n
   p <- it$problem$p
   fn <- it$fit$final

@@ -33,7 +33,7 @@ cate_internals <- function(
     data, nuisance_estimates, formula = ~X4, A = "A", Y = "Y", p = NULL,
     outcome_type = "binomial", loss = loss_squared_error, working_model = working_model_linear, tmle = tmle_control(), bayes = FALSE, onestep = onestep_control(), ...
 ) {
-  tmle <- automsm:::as_tmle_control(tmle)
+  tmle <- automsm:::resolve_fluctuation(automsm:::as_tmle_control(tmle), outcome_type)
   bayes <- automsm:::as_bayes_control(bayes)
   onestep <- automsm:::as_onestep_control(onestep)
   problem <- automsm:::cate_problem(
@@ -48,7 +48,7 @@ dose_response_internals <- function(
     data, nuisance_estimates, formula = ~A, A = "A", Y = "Y", p = NULL,
     outcome_type = "binomial", loss = loss_squared_error, working_model = working_model_linear, tmle = tmle_control(), bayes = FALSE, onestep = onestep_control(), ...
 ) {
-  tmle <- automsm:::as_tmle_control(tmle)
+  tmle <- automsm:::resolve_fluctuation(automsm:::as_tmle_control(tmle), outcome_type)
   bayes <- automsm:::as_bayes_control(bayes)
   onestep <- automsm:::as_onestep_control(onestep)
   problem <- automsm:::dose_response_problem(
