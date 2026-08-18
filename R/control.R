@@ -201,6 +201,8 @@ as_onestep_control <- function(x) {
 #' @param learners_outcome A character vector of \pkg{SuperLearner} libraries for
 #'   estimating the outcome regressions. For longitudinal estimands the same
 #'   library is used for every sequential regression.
+#' @param learners_refit Optional vector of \pkg{SuperLearner} libraries for
+#'   sequential regressions in targeted longitudinal estimation.
 #' @param outer_folds Number of folds in the outer cross-fitting loop.
 #' @param inner_folds Number of folds for the inner \pkg{SuperLearner} cross-validation
 #'   within each outer cross-fitting fold.
@@ -233,6 +235,7 @@ as_onestep_control <- function(x) {
 nuisance_control <- function(
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
+  learners_refit = NULL,
   outer_folds = 5L,
   inner_folds = 5L,
   epsilon = 1e-5,
@@ -246,6 +249,13 @@ nuisance_control <- function(
   checkmate::assert_number(epsilon, lower = 0, upper = 0.5)
   checkmate::assert_list(folds, null.ok = TRUE, min.len = 1L)
   checkmate::assert_int(seed, null.ok = TRUE)
+
+  if(is.null(learners_refit)) {
+    learners_refit <- learners_outcome
+  }
+  else {
+    assert_sl_library(learners_refit)
+  }
 
   if(inner_folds < 2L) stop("`inner_folds` must be at least 2; SuperLearner requires at least two folds to cross-validate ensemble weights.", call. = FALSE)
 

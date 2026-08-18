@@ -17,8 +17,8 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
     init_state = function(problem) {
       list(
         mu = list(
-          obs = as_float_tensor(problem$nuisance$mu),
-          arms = as_float_tensor(problem$nuisance$mu_a)
+          obs = as_float_tensor(problem$nuisance_estimates$mu),
+          arms = as_float_tensor(problem$nuisance_estimates$mu_a)
         ),
         Q = problem$Q0,
         beta = NULL

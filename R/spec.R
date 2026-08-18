@@ -3,12 +3,18 @@
 #' @noRd
 new_msm_spec <- function(
   estimand,
-  init_state, steps, psi_from_state,
-  make_clever,
-  fluctuation_offset, fluctuation_glm,
-  mu_loss, apply_update, delta,
-  tol,
-  tmle_loss,
+  psi_from_state,
+  init_state,
+  delta,
+  driver = run_tmle,
+  tmle_loss = NULL,
+  tol = 0,
+  make_clever = NULL,
+  fluctuation_offset = NULL,
+  fluctuation_glm = NULL,
+  mu_loss = NULL,
+  apply_update = NULL,
+  steps = NULL,
   nan_guard = TRUE,
   supports_bayes = FALSE,
   bayes_loglik = NULL, dpsi_depsilon = NULL,
@@ -18,6 +24,7 @@ new_msm_spec <- function(
 ) {
   spec <- list(
     estimand = estimand,
+    driver = driver,
     init_state = init_state, steps = steps, psi_from_state = psi_from_state,
     fluctuation_offset = fluctuation_offset, fluctuation_glm = fluctuation_glm,
     make_clever = make_clever, mu_loss = mu_loss, apply_update = apply_update, delta = delta,
@@ -40,14 +47,19 @@ default_sweep_criterion <- function(eps_list) {
 }
 
 validate_spec <- function(spec) {
-  fns <- c("init_state", "steps", "psi_from_state", "make_clever",
-           "fluctuation_offset", "fluctuation_glm",
-           "mu_loss", "apply_update", "delta", "sweep_criterion",
-           "bayes_clever_scale", "nuisance_contract")
+  always <- c("init_state", "psi_from_state", "delta", "nuisance_contract", "driver")
+  for(f in always) checkmate::assert_function(spec[[f]], .var.name = f)
 
-  for(f in fns) checkmate::assert_function(spec[[f]], .var.name = f)
+  if(identical(spec$driver, run_tmle)) {
+    sweep_only <- c(
+      "steps", "make_clever", "fluctuation_offset", "fluctuation_glm",
+      "mu_loss", "apply_update", "sweep_criterion",
+      "bayes_clever_scale")
 
-  checkmate::assert_number(spec$tol, lower = 0, finite = TRUE)
+    for(f in sweep_only) checkmate::assert_function(spec[[f]], .var.name = f)
+    checkmate::assert_number(spec$tol, lower = 0, finite = TRUE)
+  }
+
   checkmate::assert_flag(spec$supports_bayes)
   if(spec$supports_bayes) {
     checkmate::assert_function(spec$bayes_loglik)

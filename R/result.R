@@ -29,7 +29,7 @@ new_automsm <- function(problem, base, tmle = NULL, bayes_tmle = NULL, nuisance)
     loss               = problem$loss,
     terms              = problem$terms,
     nuisance_control   = nuisance,
-    nuisance_estimates = problem$nuisance,
+    nuisance_estimates = problem$nuisance_estimates,
     regimes            = problem$aux$regimes,
     plugin             = base$plugin,
     onestep            = base$onestep,

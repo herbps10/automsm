@@ -13,8 +13,7 @@ test_that("dose_response continous one-step fixture is stable", {
     formula = ~1 + v,
     loss = loss_squared_error,
     outcome_type = "continuous",
-    tmle = FALSE,
-    nuisance_estimates = fx$nuisance_estimates
+    tmle = FALSE
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-3)
@@ -25,6 +24,7 @@ test_that("dose_response continous one-step fixture is stable", {
 test_that("dose_response binary one-step fixture is stable", {
   fx <- readRDS(test_path("fixtures", "longitudinal_dose_response_binary.rds"))
 
+  set.seed(1)
   fit <- longitudinal_dose_response(
     fx$dat,
     Ls = fx$Ls,
@@ -35,8 +35,7 @@ test_that("dose_response binary one-step fixture is stable", {
     formula = ~1 + v,
     loss = loss_cross_entropy_logit,
     outcome_type = "binomial",
-    tmle = FALSE,
-    nuisance_estimates = fx$nuisance_estimates
+    tmle = FALSE
   )
 
   expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-3)
@@ -48,6 +47,7 @@ test_that("dose_response binary one-step fixture is stable", {
 test_that("dose_response continous linear TMLE fixture is stable", {
   fx <- readRDS(test_path("fixtures", "longitudinal_dose_response_continuous.rds"))
 
+  set.seed(1)
   fit <- longitudinal_dose_response(
     fx$dat,
     fx$Ls,
@@ -58,8 +58,7 @@ test_that("dose_response continous linear TMLE fixture is stable", {
     formula = ~1 + v,
     loss = loss_squared_error,
     outcome_type = "continuous",
-    tmle = TRUE,
-    nuisance_estimates = fx$nuisance_estimates
+    tmle = TRUE
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-3)
@@ -69,6 +68,7 @@ test_that("dose_response continous linear TMLE fixture is stable", {
 test_that("dose_response continous binary TMLE fixture is stable", {
   fx <- readRDS(test_path("fixtures", "longitudinal_dose_response_binary.rds"))
 
+  set.seed(1)
   fit <- longitudinal_dose_response(
     fx$dat,
     fx$Ls,
@@ -79,8 +79,7 @@ test_that("dose_response continous binary TMLE fixture is stable", {
     formula = ~1 + v,
     loss = loss_cross_entropy_logit,
     outcome_type = "binomial",
-    tmle = TRUE,
-    nuisance_estimates = fx$nuisance_estimates
+    tmle = TRUE
   )
 
   expect_equal(fit$tmle$est, fx$fit_tmle$tmle$est, tolerance = 1e-3)
@@ -213,10 +212,11 @@ run_longitudinal_regression <- function(setup) {
   control <- nuisance_control()
   cv <- nuisance_setup(nrow(setup$data), control, outcome_type = "binomial")
 
-  estimate_longitudinal_dose_response_regressions(
+  estimate_ice_chain(
     data = setup$data, Ls = setup$Ls, As = setup$As, Y = "Y",
-    regimes = setup$regimes, learners_outcome = control$learners_outcome,
-    cv = cv$cv, outcome_type = "binomial", outcome_family = cv$outcome_family, cv_control = cv$cv_control,
+    regimes = setup$regimes, learners = control$learners_outcome,
+    folds = cv$cv, outcome_family = cv$outcome_family, cv_control = cv$cv_control,
+    bounds = c(0, 1),
     epsilon = control$epsilon
   )
 }

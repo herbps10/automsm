@@ -86,16 +86,33 @@ probe_batched_beta <- function(working_model, design_matrix, p) {
   isTRUE(as.numeric((many - one)$abs()$max()) < 1e-5)
 }
 
+#' Probe whether the clever-covariate design depends on (psi, beta)
+#'
+#' @noRd
+probe_design_invariance <- function(problem, reps = 3L, tol = 1e-6) {
+  draw <- function() {
+    psi <- torch::torch_rand(c(problem$n, problem$K))$mul(0.6)$add(0.2)
+    beta <- torch::torch_randn(problem$p)$mul(0.1)
+    as.array(nabla_Ldot(problem, psi$detach()$clone()$requires_grad_(TRUE), beta$detach()$clone()$requires_grad_(TRUE))$detach())
+  }
+  ref <- draw()
+  if(!all(is.finite(ref))) return(FALSE)
+  all(vapply(seq_len(reps - 1L), function(i) {
+    d <- draw()
+    all(is.finite(d)) && max(abs(d - ref)) < tol
+  }, logical(1)))
+}
+
 new_msm_problem <- function(estimand, K, d, p, tau = 1L,
                             design_matrix, Q0, Yt, Lm_fn,
                             loss, working_model, formula, terms,
-                            outcome_type, nuisance_estimates, aux = list()) {
+                            outcome_type, nuisance_estimates, nuisance_engine = NULL, aux = list()) {
   n <- dim(design_matrix)[1]
   stopifnot(identical(dim(design_matrix), c(n, as.integer(K), as.integer(d))))
   validate_working_model_dim(working_model, design_matrix, p)
   design_kappa <- validate_design_conditioning(design_matrix, terms, d)
   batched_beta <- probe_batched_beta(working_model, design_matrix, p)
-  structure(
+  problem <- structure(
     list(estimand = estimand, n = n, K = as.integer(K), d = as.integer(d),
          p = as.integer(p), tau = as.integer(tau),
          design_matrix = design_matrix, Q0 = Q0, Yt = as_float_tensor(Yt),
@@ -103,7 +120,12 @@ new_msm_problem <- function(estimand, K, d, p, tau = 1L,
          formula = formula, terms = terms, outcome_type = outcome_type,
          batched_beta = batched_beta,
          design_kappa = design_kappa,
-         nuisance_estimates = nuisance_estimates, aux = aux),
+         nuisance_estimates = nuisance_estimates, nuisance_engine = nuisance_engine,
+         aux = aux),
     class = "msm_problem"
   )
+
+  problem$design_invariant <- probe_design_invariance(problem)
+
+  problem
 }

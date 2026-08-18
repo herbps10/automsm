@@ -1,80 +1,20 @@
 msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
-  tmle_loss <- if(tmle_linear) {
-    f <- torch::nn_mse_loss(reduction = "sum")
-    function(x, y) 0.5 * f(x, y)
-  }
-  else {
-    torch::nn_bce_with_logits_loss(reduction = "sum")
-  }
-
   new_msm_spec(
     estimand = "longitudinal_dose_response",
-    tol = 1e-2,
-    nan_guard = TRUE,
     supports_bayes = FALSE,
-    tmle_loss = tmle_loss,
+    driver = run_ice_tmle,
 
     init_state = function(problem) {
       list(
-        mu = list(
-          nodes = lapply(seq_len(problem$tau + 1L), function(t) {
-            as_float_tensor(t(problem$nuisance$mu[, , t]))
-          })
-        ),
+        nodes = problem$nuisance_estimates$mu,
         Q = problem$Q0,
-        beta = NULL,
-        initial = TRUE
+        beta = NULL
       )
-    },
-
-    # Backward sweep over ICE nodes. Q is fluctuated once per sweep, at t = 1.
-    steps = function(problem) {
-      lapply(problem$tau:1, function(t) {
-        list(id = t, t = t, fluctuate_Q = (t == 1L))
-      })
     },
 
     psi_from_state = function(problem, state) {
-      psi <- state$mu$nodes[[1]]
-      psi <- psi$detach()$clone()
-      psi$requires_grad_(TRUE)
-      psi
-    },
-
-    make_clever = function(problem, step, state, psi, Minv) {
-      n <- problem$n
-      K <- problem$K
-      d <- clever_directions(problem, psi, state$beta, Minv)
-      list(arms = d * problem$aux$HA_node[, , step$t]$t()$reshape(c(n, K, 1)))
-    },
-
-    fluctuation_offset = function(problem, step, state) {
-      node <- state$mu$nodes[[step$t]]
-      if(tmle_linear) node else node$logit()
-    },
-
-    fluctuation_glm = function(problem, step, state, clever) {
-      N <- problem$n * problem$K
-      list(
-        X = as.matrix(clever$arms$reshape(c(N, problem$p))),
-        offset = as.numeric(clever$offset$reshape(N)),
-        target = as.numeric(state$mu$nodes[[step$t + 1L]]$reshape(N))
-      )
-    },
-
-    mu_loss = function(epsilon, problem, step, state, clever) {
-      tmle_loss(clever$offset + clever$arms$matmul(epsilon), state$mu$nodes[[step$t + 1L]])
-    },
-
-    apply_update = function(problem, step, state, epsilon, clever, K_Q) {
-      eta <- clever$offset + clever$arms$matmul(epsilon)
-      update <- if(tmle_linear) eta else clamp_fit(torch::torch_sigmoid(eta), problem$clamp)
-      state$mu$nodes[[step$t]] <- update$detach()
-      if(isTRUE(step$fluctuate_Q)) {
-        state$Q <- Q_fluctuation(epsilon, K_Q, state$Q)
-      }
-      state$initial <- FALSE
-      state
+      psi <- as_float_tensor(t(state$nodes[, , 1L]))
+      psi$detach()$clone()$requires_grad_(TRUE)
     },
 
     # Telescoping ICE residual:
@@ -83,9 +23,10 @@ msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
       n <- problem$n
       k <- problem$K
       tau <- problem$tau
-      nodes <- lapply(state$mu$nodes, as.matrix)
       resid <- array(0, dim = c(k, n, tau))
-      for(t in seq_len(tau)) resid[, , t] <- t(nodes[[t + 1L]] - nodes[[t]])
+      for(t in seq_len(tau)) {
+        resid[, , t] <- state$nodes[, , t + 1L] - state$nodes[, , t]
+      }
       resid <- resid / problem$aux$pi_cumprod * problem$aux$W
       stopifnot(all(is.finite(resid)))
       as_float_tensor(t(apply(resid, c(1, 2), sum))) # (n, k)

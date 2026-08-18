@@ -31,7 +31,7 @@ fit_msm <- function(problem, spec,
   tmle_res <- NULL
   fit <- NULL
   if(tmle$enabled) {
-    fit <- run_tmle(problem, spec, tmle, state0)
+    fit <- spec$driver(problem, spec, tmle, state0)
     tmle_res <- finalize_tmle(problem, spec, fit)
   }
 
@@ -59,12 +59,16 @@ estimate_plugin_and_onestep <- function(
   onestep_lower <- onestep_est + stats::qnorm(0.025) * onestep_se
   onestep_upper <- onestep_est + stats::qnorm(0.975) * onestep_se
 
-  if(!is.null(seed)) set.seed(seed)
-  onestep_joint <- mvtnorm::rmvnorm(
-    joint_draws,
-    mean = as.numeric(onestep_est),
-    sigma = var(as.matrix(onestep_eif)) / n
-  )
+
+  sample_joint <- function() {
+    mvtnorm::rmvnorm(
+      joint_draws,
+      mean = as.numeric(onestep_est),
+      sigma = var(as.matrix(onestep_eif)) / n
+    )
+  }
+
+  onestep_joint <- if(is.null(seed)) sample_joint() else withr::with_seed(seed, sample_joint())
 
   list(
     plugin = list(est = as.numeric(plugin)),

@@ -173,25 +173,9 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
   regimes <- expand.grid(rep(list(c(0, 1)), tau))
   colnames(regimes) <- As
 
-  set.seed(1)
-  nuisance_estimates <- estimate_longitudinal_dose_response_nuisance(
-    data = dat,
-    Ls = Ls,
-    As = As,
-    Y = "Y",
-    regimes = regimes,
-    control = nuisance_control(
-      learners_trt = "SL.glm.interaction",
-      learners_outcome = "SL.glm.interaction",
-      outer_folds = 2,
-      inner_folds = 2,
-      epsilon = 1e-5,
-    ),
-    outcome_type = outcome_type
-  )
-
   loss <- if(outcome_type == "continuous") loss_squared_error else loss_cross_entropy_logit
 
+  set.seed(1)
   fit_onestep <- longitudinal_dose_response(
     dat,
     Ls,
@@ -202,8 +186,7 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
     formula = ~1 + v,
     loss = loss,
     outcome_type = outcome_type,
-    tmle = FALSE,
-    nuisance_estimates = nuisance_estimates
+    tmle = FALSE
   )
 
   set.seed(1)
@@ -217,14 +200,12 @@ make_longitudinal_dose_response_fixture <- function(path, binary) {
     formula = ~1 + v,
     loss = loss,
     outcome_type = outcome_type,
-    tmle = TRUE,
-    nuisance_estimates = nuisance_estimates
+    tmle = TRUE
   )
 
   saveRDS(
     list(
       dat = dat,
-      nuisance_estimates = nuisance_estimates,
       fit_onestep = fit_onestep,
       fit_tmle = fit_tmle,
       tau = tau,

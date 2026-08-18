@@ -7,6 +7,7 @@
 nuisance_control(
   learners_trt = "SL.glm",
   learners_outcome = "SL.glm",
+  learners_refit = NULL,
   outer_folds = 5L,
   inner_folds = 5L,
   epsilon = 1e-05,
@@ -21,6 +22,9 @@ the propensity scores. For longitudinal estimands the same library is used at ev
 \item{learners_outcome}{A character vector of \pkg{SuperLearner} libraries for
 estimating the outcome regressions. For longitudinal estimands the same
 library is used for every sequential regression.}
+
+\item{learners_refit}{Optional vector of \pkg{SuperLearner} libraries for
+sequential regressions in targeted longitudinal estimation.}
 
 \item{outer_folds}{Number of folds in the outer cross-fitting loop.}
 

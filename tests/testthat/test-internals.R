@@ -24,7 +24,7 @@ msm_internals <- function(problem, spec, tmle, bayes, onestep, joint_seed = 1L) 
     tmle = res$tmle,
     bayes = res$bayes,
     prior = bayes$prior,
-    condvar = if(is.null(problem$nuisance$condvar)) NULL else automsm:::as_float_tensor(problem$nuisance$condvar),
+    condvar = if(is.null(problem$nuisance_estimates$condvar)) NULL else automsm:::as_float_tensor(problem$nuisance_estimates$condvar),
     tmle_linear = tmle$linear
   ), class = "msm_internals")
 }

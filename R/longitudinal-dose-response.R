@@ -111,16 +111,11 @@ longitudinal_dose_response <- function(
     nuisance_estimates
   )
 
-  if (is.null(nuisance_estimates)) {
-    nuisance_estimates <- with_nuisance_seed(nuisance, estimate_longitudinal_dose_response_nuisance(
-      data,
-      Ls,
-      As,
-      Y,
-      regimes,
-      nuisance,
-      outcome_type
-    ))
+  engine <- if(!is.null(nuisance_estimates)) {
+    frozen_engine(nuisance_estimates)
+  }
+  else {
+    longitudinal_sl_engine(data, Ls, As, Y, regimes, nuisance, outcome_type)
   }
 
   problem <- longitudinal_dose_response_problem(
@@ -128,7 +123,7 @@ longitudinal_dose_response <- function(
     regimes, summary_measures,
     p, outcome_type,
     loss, working_model,
-    nuisance_estimates
+    engine, nuisance
   )
 
   spec <- msm_spec_longitudinal_dose_response(tmle_linear = tmle$linear)
@@ -149,7 +144,7 @@ longitudinal_dose_response_problem <- function(data, Ls, As, Y, formula,
                                                outcome_type = "binomial",
                                                loss = loss_squared_error,
                                                working_model = working_model_linear,
-                                               nuisance_estimates) {
+                                               engine, nuisance) {
   n <- nrow(data)
   tau <- length(As)
   k <- nrow(regimes)
@@ -176,6 +171,8 @@ longitudinal_dose_response_problem <- function(data, Ls, As, Y, formula,
     dm <- build_design_tensor(formula, data, K = k, mutate = NULL, p = p)
   }
 
+  nuisance_estimates = engine$initial()
+
   pi_cumprod <- cumulative_propensity_scores(regimes, nuisance_estimates$pi)
   W <- on_protocol_weights(regimes, as.matrix(data[, As, drop = FALSE]))
   HA_node <- W / pi_cumprod
@@ -189,7 +186,9 @@ longitudinal_dose_response_problem <- function(data, Ls, As, Y, formula,
     Lm_fn = Lm(loss, working_model),
     loss = loss, working_model = working_model,
     formula = formula, terms = dm$terms,
-    outcome_type = outcome_type, nuisance_estimates = nuisance_estimates,
+    outcome_type = outcome_type,
+    nuisance_estimates = nuisance_estimates,
+    nuisance_engine = engine,
     aux = list(
       HA_node = torch::torch_tensor(HA_node),
       pi_cumprod = pi_cumprod,
@@ -301,124 +300,6 @@ estimate_longitudinal_dose_response_propensity_scores <- function(
   pi_hat
 }
 
-#' Estimate the sequential (ICE) outcome regressions for a longitudinal NP-MSM
-#'
-#' @details
-#' The pseudo-outcomes at node \code{t} depends on the treatment trajectory only
-#' through its suffix \eqn{(a_t, \dots, a_\tau)}. The recursion works over the
-#' distinct suffixes actually present in \code{regimes}, matching each
-#' to its parent suffix by key, so only the requested regimes are produced
-#' (and slice \code{j} of the returned array corresponds to row \code{j} of
-#' \code{regimes}). Each regression is fit pooling over all observed treatment
-#' values and then evaluated at the regime's value of \eqn{A_t}, so rules
-#' with little support still borrow strength from the full sample.
-#'
-#' @importFrom stats gaussian
-#' @noRd
-estimate_longitudinal_dose_response_regressions <- function(
-  data,
-  Ls,
-  As,
-  Y,
-  regimes,
-  learners_outcome,
-  cv,
-  outcome_type,
-  outcome_family,
-  cv_control,
-  epsilon
-) {
-  n <- nrow(data)
-  tau <- length(As)
-  k <- nrow(regimes)
-
-  bounds <- if(outcome_type == "binomial") c(0, 1) else NULL
-
-  # Distinct suffixes requested at each level
-  suffixes <- vector("list", tau + 1L)
-  for(t in seq_len(tau)) {
-    suffixes[[t]] <- unique(regimes[, As[t:tau], drop = FALSE])
-  }
-  suffixes[[tau + 1L]] <- regimes[1L, integer(0), drop = FALSE]
-
-  # Recursion over suffixes
-  regress_and_predict <- function(t, train, valid) {
-    # Base case: if t == tau, then pseudo-outcome is Y
-    if (t == tau + 1L) {
-      return(list(
-        keys = regime_key(suffixes[[tau + 1L]]),
-        fits = list(list(
-        train = matrix(data[[Y]][train], ncol = 1),
-        valid = matrix(data[[Y]][valid], ncol = 1)
-        ))
-      ))
-    }
-
-    parent <- regress_and_predict(t + 1L, train, valid)
-
-    needed <- suffixes[[t]]
-    keys_t <- regime_key(needed)
-    parent_idx <- match(regime_key(needed[, -1L, drop = FALSE]), parent$keys)
-    stopifnot(!anyNA(parent_idx))
-
-    a_t_vals <- needed[[As[t]]]
-    Ht_At <- c(history_cols(t, Ls, As), As[t])
-    Xtrain <- data[train, Ht_At, drop = FALSE]
-    fam <- if(t == tau) outcome_family else stats::gaussian()
-
-    out <- vector("list", nrow(needed))
-
-    # One fit per distinct parent pseudo-outcome; reuse it across the a_t
-    # values required by the regimes sharing that parent.
-    for (pj in unique(parent_idx)) {
-      po <- parent$fits[[pj]]
-
-      mu_fit <- sl_fit(
-        Y = po$train[, 1L],
-        X = Xtrain,
-        SL.library = learners_outcome,
-        family = fam,
-        cv_control = cv_control
-      )
-
-      for (j in which(parent_idx == pj)) {
-        nd_train <- data[train, Ht_At, drop = FALSE]
-        nd_valid <- data[valid, Ht_At, drop = FALSE]
-        nd_train[[As[t]]] <- a_t_vals[j]
-        nd_valid[[As[t]]] <- a_t_vals[j]
-
-        out[[j]] <- list(
-          train = cbind(sl_predict(mu_fit, nd_train, bounds, epsilon), po$train),
-          valid = cbind(sl_predict(mu_fit, nd_valid, bounds, epsilon), po$valid)
-        )
-      }
-    }
-
-    list(keys = keys_t, fits = out)
-  }
-
-  regime_keys <- regime_key(regimes)
-  mu_valid <- array(NA_real_, dim = c(k, n, tau + 1L))
-
-  for (fold in seq_along(cv)) {
-    train <- cv[[fold]]$training_set
-    valid <- cv[[fold]]$validation_set
-
-    res <- regress_and_predict(1L, train, valid)
-
-    idx <- match(regime_keys, res$keys)
-    stopifnot(!anyNA(idx))
-
-    for (j in seq_len(k)) {
-      mu_valid[j, valid, ] <- res$fits[[idx[j]]]$valid
-    }
-  }
-
-  stopifnot(!anyNA(mu_valid))
-
-  mu_valid
-}
-
 #' @importFrom  origami  make_folds
 #' @importFrom  SuperLearner SuperLearner.CV.control predict.SuperLearner SuperLearner
 #' @importFrom stats gaussian binomial
@@ -432,44 +313,5 @@ estimate_longitudinal_dose_response_nuisance <- function(
   control,
   outcome_type
 ) {
-  setup <- nuisance_setup(nrow(data), control, outcome_type)
-
-  pi_hat <- estimate_longitudinal_dose_response_propensity_scores(
-    data,
-    Ls,
-    As,
-    setup$cv,
-    control$learners_trt,
-    setup$cv_control,
-    control$epsilon
-  )
-
-  mu_hat <- estimate_longitudinal_dose_response_regressions(
-    data,
-    Ls,
-    As,
-    Y,
-    regimes,
-    control$learners_outcome,
-    setup$cv,
-    outcome_type,
-    setup$outcome_family,
-    setup$cv_control,
-    control$epsilon
-  )
-
-  list(
-    pi = pi_hat,
-    mu = mu_hat
-  )
-}
-
-#' Stable key for a set of treatment trajectories (or suffixes thereof)
-#'
-#' Handles the zero-column case (the empty suffix at node \eqn{tau + 1})
-#' @noRd
-regime_key <- function(x) {
-  x <- as.matrix(x)
-  if(ncol(x) == 0L) return(rep("", nrow(x)))
-  apply(x, 1L, paste, collapse = "\r")
+  longitudinal_sl_engine(data, Ls, As, Y, regimes, control, outcome_type)$initial()
 }

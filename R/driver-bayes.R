@@ -113,7 +113,7 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
 
   p <- problem$p
   final <- fit$final
-  condvar <- if(is.null(problem$nuisance$condvar)) NULL else as_float_tensor(problem$nuisance$condvar)
+  condvar <- if(is.null(problem$nuisance_estimates$condvar)) NULL else as_float_tensor(problem$nuisance_estimates$condvar)
 
   log_dens <- function(epsilon) {
     bayes_log_density(torch::torch_tensor(epsilon), problem, spec, fit$state, final$clever, final$K_Q, condvar, control$prior)

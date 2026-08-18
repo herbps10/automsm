@@ -143,7 +143,8 @@ finalize_tmle <- function(problem, spec, fit) {
       status = fit$status,
       iter = fit$iter,
       solved = if(is.null(fit$diag)) NA_real_ else fit$diag$ratio,
-      solver_log = fit$solver_log
+      solver_log = fit$solver_log,
+      design_invariant = problem$design_invariant
     ))
   }
 
@@ -161,6 +162,7 @@ finalize_tmle <- function(problem, spec, fit) {
     status = "converged",
     iter = fit$iter,
     solved = d$ratio,
-    solver_log = fit$solver_log
+    solver_log = fit$solver_log,
+    design_invariant = problem$design_invariant
   )
 }

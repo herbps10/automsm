@@ -27,9 +27,9 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       n <- problem$n
       list(
         mu = list(
-          obs = as_float_tensor(problem$nuisance$mu)$reshape(c(n, 1)),
-          a0 = as_float_tensor(problem$nuisance$mu0)$reshape(c(n, 1)),
-          a1 = as_float_tensor(problem$nuisance$mu1)$reshape(c(n, 1))
+          obs = as_float_tensor(problem$nuisance_estimates$mu)$reshape(c(n, 1)),
+          a0 = as_float_tensor(problem$nuisance_estimates$mu0)$reshape(c(n, 1)),
+          a1 = as_float_tensor(problem$nuisance_estimates$mu1)$reshape(c(n, 1))
         ),
         Q = problem$Q0,
         beta = NULL
