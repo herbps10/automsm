@@ -68,7 +68,12 @@ estimate_plugin_and_onestep <- function(
     )
   }
 
-  onestep_joint <- if(is.null(seed)) sample_joint() else withr::with_seed(seed, sample_joint())
+  if(joint_draws > 0) {
+    onestep_joint <- if(is.null(seed)) sample_joint() else withr::with_seed(seed, sample_joint())
+  }
+  else {
+    onestep_joint <- NULL
+  }
 
   list(
     plugin = list(est = as.numeric(plugin)),
