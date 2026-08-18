@@ -25,22 +25,22 @@ tidy.automsm <- function(x, ...) {
     )
   }
 
-  tidy_samples <- function(samples, label, margin = 3) {
-    if(is.null(samples)) return(NULL)
+  tidy_samples <- function(draws, label, margin = 3) {
+    if(is.null(draws)) return(NULL)
     tibble::tibble(
       estimator = label,
       term = terms,
-      estimate = as.numeric(apply(samples, margin, stats::median)),
-      conf.low = as.numeric(apply(samples, margin, stats::quantile, 0.025)),
-      conf.high = as.numeric(apply(samples, margin, stats::quantile, 0.975)),
-      std.error = as.numeric(apply(samples, margin, stats::sd)),
+      estimate = as.numeric(apply(draws, margin, stats::median)),
+      conf.low = as.numeric(apply(draws, margin, stats::quantile, 0.025)),
+      conf.high = as.numeric(apply(draws, margin, stats::quantile, 0.975)),
+      std.error = as.numeric(apply(draws, margin, stats::sd)),
     )
   }
 
   purrr::list_rbind(purrr::compact(list(
     tidy_estimator(x$onestep, "onestep"),
     tidy_estimator(x$tmle, "tmle"),
-    tidy_samples(x$tmle$samples, "bayestmle")
+    tidy_samples(x$bayes$draws, "bayes")
   )))
 }
 
