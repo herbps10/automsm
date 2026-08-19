@@ -12,6 +12,8 @@ bayes_control(
   prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
   scale = NULL,
   acc_rate = 0.3,
+  eps_max = NULL,
+  min_ess = NULL,
   seed = NULL,
   labels = c("index", "terms")
 )
@@ -35,6 +37,14 @@ Note that this is only for the initial proposal; the sampler adapts toward \code
 during warmup.}
 
 \item{acc_rate}{Target acceptance rate for the adaptive sampler.}
+
+\item{eps_max}{Largest permitted \eqn{\|\epsilon\|_\infty}. Proposals outside the
+box are assigned zero density. If \code{NULL}, resolved from the clever-covariate magnitudes
+so that the fluctuated covariate distribution cannot collapse into a single observation.}
+
+\item{min_ess}{Minimum effective sample size of \eqn{Q_\epsilon}. Defaults to \code{2 * p}:
+\eqn{E_{Q_\epsilon}[\ddot{L}_m]} cannot have rank \code{p} on fewer than \code{p}
+support points.}
 
 \item{seed}{Integer; optional random seed for MCMC algorithm}
 

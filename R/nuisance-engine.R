@@ -56,9 +56,9 @@ longitudinal_sl_engine <- function(data, Ls, As, Y, regimes, control, outcome_ty
   refit_node <- function(t, target_train, fold_index) {
     family <- if(t == tau) setup$outcome_family else stats::gaussian()
     with_seed_offset(control$seed, 1000L + 100L * t + fold_index, fit_ice_node(t, target_train, data, Ls, As, regimes,
-                 fold = setup$cv[[fold_index]],
-                 learners = learners_refit, family = family, bounds = bounds,
-                 epsilon = control$epsilon, cv_control = setup$cv_control))
+                                                                               fold = setup$cv[[fold_index]],
+                                                                               learners = learners_refit, family = family, bounds = bounds,
+                                                                               epsilon = control$epsilon, cv_control = setup$cv_control))
   }
 
   new_nuisance_engine(

@@ -123,12 +123,41 @@ dobjective_dbeta <- function(Lm, psi, beta, design_matrix, Q, p) {
   torch::torch_cat(r, dim = 2) # p x p
 }
 
-dB_dpsi <- function(Lm, psi, beta, design_matrix, Q, p) {
-  -dobjective_dpsi(Lm, psi, beta, design_matrix, Q, p)$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p)))
+#' Invert E_Q\[Lddot\], or surface that it's degenerate
+#'
+#' Returns NULL when the objective Hessian is singular or ill-conditioned.
+#' @noRd
+invert_objective_hessian <- function(H, tol = 1e-10) {
+  Hm <- as.matrix(H$detach())
+  if(!all(is.finite(Hm))) return(NULL)
+
+  rc <- tryCatch(rcond(Hm), error = function(e) NA_real_)
+  if(!is.finite(rc) || rc < tol) return(NULL)
+  inv <- tryCatch(solve(Hm), error = function(e) NULL)
+  if(is.null(inv) || !all(is.finite(inv))) return(NULL)
+  list(inv = torch::torch_tensor(inv), rcond = rc)
 }
 
-dB_dQ <- function(Lm, psi, beta, design_matrix, Q, p) {
-  -dobjective_dQ(Lm, psi, beta, design_matrix, Q, p)$matmul(torch::linalg_inv(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p)))
+dB_dpsi <- function(Lm, psi, beta, design_matrix, Q, p, Hinv = NULL) {
+  if(is.null(Hinv)) {
+    check <- invert_objective_hessian(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p))
+    if(is.null(check)) {
+      stop("E_Q[Lddot] is singular; cannot form dB_dpsi.")
+    }
+    Hinv <- check$inv
+  }
+  -dobjective_dpsi(Lm, psi, beta, design_matrix, Q, p)$matmul(Hinv)
+}
+
+dB_dQ <- function(Lm, psi, beta, design_matrix, Q, p, Hinv = NULL) {
+  if(is.null(Hinv)) {
+    check <- invert_objective_hessian(dobjective_dbeta(Lm, psi, beta, design_matrix, Q, p))
+    if(is.null(check)) {
+      stop("E_Q[Lddot] is singular; cannot form dB_dpsi.")
+    }
+    Hinv <- check$inv
+  }
+  -dobjective_dQ(Lm, psi, beta, design_matrix, Q, p)$matmul(Hinv)
 }
 
 #' @importFrom torch torch_tensor

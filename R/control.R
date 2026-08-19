@@ -103,6 +103,12 @@ tmle_control <- function(
 #'   Note that this is only for the initial proposal; the sampler adapts toward \code{acc_rate}
 #'   during warmup.
 #' @param acc_rate Target acceptance rate for the adaptive sampler.
+#' @param eps_max Largest permitted \eqn{\|\epsilon\|_\infty}. Proposals outside the
+#'   box are assigned zero density. If \code{NULL}, resolved from the clever-covariate magnitudes
+#'   so that the fluctuated covariate distribution cannot collapse into a single observation.
+#' @param min_ess Minimum effective sample size of \eqn{Q_\epsilon}. Defaults to \code{2 * p}:
+#'   \eqn{E_{Q_\epsilon}[\ddot{L}_m]} cannot have rank \code{p} on fewer than \code{p}
+#'   support points.
 #' @param seed Integer; optional random seed for MCMC algorithm
 #' @param labels How to label posterior parameters: \code{"index"} to label by index, or \code{"terms"} to
 #'   use the terms from the working model formula
@@ -111,15 +117,17 @@ tmle_control <- function(
 #' @family automsm control
 #' @export
 bayes_control <- function(
-  enabled = TRUE,
-  draws = 1e3,
-  warmup = 1e3,
-  chains = 4L,
-  prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
-  scale = NULL,
-  acc_rate = 0.3,
-  seed = NULL,
-  labels = c("index", "terms")
+    enabled = TRUE,
+    draws = 1e3,
+    warmup = 1e3,
+    chains = 4L,
+    prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
+    scale = NULL,
+    acc_rate = 0.3,
+    eps_max = NULL,
+    min_ess = NULL,
+    seed = NULL,
+    labels = c("index", "terms")
 ) {
   labels <- match.arg(labels)
   checkmate::assert_flag(enabled)
@@ -128,7 +136,9 @@ bayes_control <- function(
   checkmate::assert_count(chains, positive = TRUE)
   checkmate::assert_function(prior)
   checkmate::assert_numeric(scale, lower = 0, any.missing = FALSE, min.len = 1L, null.ok = TRUE)
-  checkmate::assert_number(acc_rate ,lower = 0, upper = 1)
+  checkmate::assert_number(acc_rate,lower = 0, upper = 1)
+  checkmate::assert_number(eps_max, null.ok = TRUE)
+  checkmate::assert_number(min_ess, null.ok = TRUE)
   checkmate::assert_choice(labels, choices = c("index", "terms"))
   structure(list(
     enabled = enabled,
@@ -137,7 +147,9 @@ bayes_control <- function(
     chains = as.integer(chains),
     prior = prior,
     scale = scale,
-    acc_rate = acc_rate
+    acc_rate = acc_rate,
+    eps_max = eps_max,
+    min_ess = min_ess
   ), class = "automsm_bayes_control")
 }
 
@@ -155,8 +167,8 @@ bayes_control <- function(
 #' @family automsm control
 #' @export
 onestep_control <- function(
-  joint_draws = 1e3,
-  seed = NULL
+    joint_draws = 1e3,
+    seed = NULL
 ) {
   checkmate::assert_count(joint_draws)
   checkmate::assert_int(seed, null.ok = TRUE)

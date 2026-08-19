@@ -1,3 +1,5 @@
+
+
 #' Initial proposal covariance for the generalized posterior
 #'
 #' The Bayesian submodel is set up so the score at eps = 0 equals
@@ -36,6 +38,30 @@ bayes_proposal_scale <- function(eif, ell = 2.38) {
   (ell^2 / p) * S
 }
 
+#' Resolve the compact support of the epsilon submodel
+#'
+#' @noRd
+resolve_bayes_support <- function(problem, control, K_Q, epsilon_init) {
+  p <- problem$p
+  kmax <- max(abs(as.numeric(K_Q)))
+
+  eps_max <- control$eps_max
+  if(is.null(eps_max)) {
+    eps_max <- if(kmax > 0) 10 / (2 * p * kmax) else Inf
+  }
+
+  min_ess <- control$min_ess %||% (2 * p)
+
+  init_max <- max(abs(as.numeric(epsilon_init)))
+  if(is.finite(eps_max) && init_max >= eps_max) {
+    warning("The converged TMLE epsilon (max|eps| = ", signif(init_max, 3),
+            ") lies outside the resolved eps_max = ", signif(eps_max, 3),
+            ". Widening the box so the sampler starts in support.", call. = FALSE)
+    eps_max <- 2 * init_max
+  }
+  list(eps_max = eps_max, min_ess = min_ess, K_Q_max = kmax)
+}
+
 #' Scales clever covariates for Bayesian log likelihood
 #' @noRd
 scale_bayes_clever <- function(problem, spec, state, clever) {
@@ -61,9 +87,15 @@ scale_bayes_clever <- function(problem, spec, state, clever) {
 #' J(eps) = sum_k dB_dpsi\[k\]' %*% (dpsi_k/deps) + dB_dQ' %*% (dQ/deps)
 #'
 #' @noRd
-bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon, K_Q, include_Q = TRUE) {
+bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon, K_Q, include_Q = TRUE, tol = 1e-10) {
   p <- problem$p
-  J_psi <- dB_dpsi(problem$Lm_fn, psi, beta, problem$design_matrix, Q_eps, p) # (K, n, p)
+  H <- dobjective_dbeta(problem$Lm_fn, psi, beta, problem$design_matrix, Q_eps, p)
+  check <- invert_objective_hessian(H, tol = tol)
+
+  # Check for singular Hessian
+  if(is.null(check)) return(NULL)
+
+  J_psi <- dB_dpsi(problem$Lm_fn, psi, beta, problem$design_matrix, Q_eps, p, Hinv = check$inv) # (K, n, p)
   jac <- torch::torch_zeros(c(p, p))
   for(k in seq_len(problem$K)) {
     jac <- jac + J_psi[k, , ]$transpose(1, 2)$matmul(dpsi_list[[k]])
@@ -71,7 +103,7 @@ bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon
   if(!include_Q) return(jac)
 
   Qc <- Q_eps$detach()$clone()$requires_grad_(TRUE)
-  J_Q <- dB_dQ(problem$Lm_fn, psi, beta, problem$design_matrix, Qc, p)
+  J_Q <- dB_dQ(problem$Lm_fn, psi, beta, problem$design_matrix, Qc, p, Hinv = check$inv)
   jac <- jac + J_Q$transpose(1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K_Q, Q_base))
 }
 
@@ -83,20 +115,43 @@ bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon
 #' Returns the list expected by AdaptMCMC: the first element is the
 #' log-density, remaining elements are recorded in `extra.values`
 #' @noRd
-bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior) {
+bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior, control = NULL, tally = NULL) {
+  p <- problem$p
+
+  reject <- function(reason) {
+    if(!is.null(tally)) tally$n[[reason]] <- (tally$n[[reason]] %||% 0L) + 1L
+    list(log.density = -Inf, beta = rep(NA_real_, p))
+  }
+
+  eps <- as.numeric(epsilon)
+  if(!all(is.finite(eps))) return(reject("nonfinite_eps"))
+  if(max(abs(eps)) > (control$eps_max %||% Inf)) return(reject("eps_max"))
+
   step <- spec$steps(problem)[[1]]
 
   clever_b <- scale_bayes_clever(problem, spec, state, clever)
 
   st <- spec$apply_update(problem, step, state, epsilon, clever_b, K_Q)
+
+  # Effective sample size of Q_eps: n at uniform, 1 at a point mass
+  ess <- 1 / sum(as.numeric(st$Q)^2)
+  if(ess < (control$min_ess %||% 0)) return(reject("low_ess"))
+
   psi <- spec$psi_from_state(problem, st)
   beta <- B(problem$Lm_fn, psi, problem$design_matrix, st$Q, problem$p)
 
-  loglik <- as.numeric(spec$bayes_loglik(epsilon, problem, state, clever_b, st$Q, condvar))
-  dpsi <- spec$dpsi_depsilon(problem, st, clever, epsilon)
-  jac <- bayes_jacobian(problem, psi, state$Q, st$Q, beta, dpsi, epsilon, K_Q)
+  if(!all(is.finite(as.numeric(beta)))) return(reject("nonfinite_beta"))
 
-  target <- loglik + prior(as.numeric(beta)) + as.numeric(jac$det()$abs()$log())
+  loglik <- as.numeric(spec$bayes_loglik(epsilon, problem, state, clever_b, st$Q, condvar))
+  dpsi <- spec$dpsi_depsilon(problem, st, clever_b, epsilon)
+  jac <- bayes_jacobian(problem, psi, state$Q, st$Q, beta, dpsi, epsilon, K_Q)
+  if(is.null(jac)) return(reject("singular_hessian"))
+
+  ld <- as.numeric(jac$det()$abs()$log())
+  if(!is.finite(ld)) return(reject("singular_jacobian"))
+
+  target <- loglik + prior(as.numeric(beta)) + ld
+  if(!is.finite(target)) return(reject("nonfinite_target"))
 
   list(log.density = as.numeric(target), beta = as.numeric(beta))
 }
@@ -108,23 +163,30 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
   }
   if(!fit$converged) {
     warning("TMLE did not converge; skipping the generalized Bayesian step.")
-    return(list(samples = NULL, acc_rate = NA_real_))
+    return(NULL)
   }
 
   p <- problem$p
   final <- fit$final
   condvar <- if(is.null(problem$nuisance_estimates$condvar)) NULL else as_float_tensor(problem$nuisance_estimates$condvar)
 
-  log_dens <- function(epsilon) {
-    bayes_log_density(torch::torch_tensor(epsilon), problem, spec, fit$state, final$clever, final$K_Q, condvar, control$prior)
+  checkmate::assert_number(control$prior(rep(0, p)), finite = TRUE, .var.name = "bayes_control(prior)")
+
+  support <- resolve_bayes_support(problem, control, final$K_Q, final$epsilon)
+  control <- utils::modifyList(control, support[c("eps_max", "min_ess")])
+
+  tally <- new_bayes_tally()
+
+  tally <- new_bayes_tally()
+  eval_density <- function(epsilon, tally_env) {
+    bayes_log_density(
+      torch::torch_tensor(epsilon), problem, spec, fit$state,
+      final$clever, final$K_Q, condvar,
+      prior = control$prior, control = control, tally = tally_env
+    )
   }
+  log_dens <- function(epsilon) eval_density(epsilon, tally)
 
-  total <- control$warmup + control$draws
-  keep <- (control$warmup + 1L):total # Discard warmup draws
-
-  beta_samples <- array(NA_real_, dim = c(control$chains, control$draws, p))
-  epsilon_samples <- array(NA_real_, dim = c(control$chains, control$draws, p + 1L))
-  acc <- numeric(control$chains)
 
   scale <- control$scale
   if(is.null(scale)) {
@@ -137,6 +199,20 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
     scale <- diag(rep_len(scale, p), nrow = p)
   }
 
+  probe_tally <- new_bayes_tally()
+  ld0 <- eval_density(final$epsilon, probe_tally)$log.density
+  if(!is.finite(ld0)) {
+    stop("Generalizd posterior log-density is not finite at the converged TMLE epsilon.", call. = FALSE)
+  }
+
+  total <- control$warmup + control$draws
+  keep <- (control$warmup + 1L):total # Discard warmup draws
+
+  beta_samples <- array(NA_real_, dim = c(control$chains, control$draws, p))
+  epsilon_samples <- array(NA_real_, dim = c(control$chains, control$draws, p + 1L))
+  acc <- numeric(control$chains)
+  rej_by_chain <- vector("list", control$chains)
+
   run_chain <- function() {
     adaptMCMC::MCMC(
       log_dens, n = total, init = as.numeric(final$epsilon),
@@ -145,6 +221,8 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
   }
 
   for(chain in seq_len(control$chains)) {
+    before <- tally_counts(tally)
+
     mcmc <- if(is.null(control$seed)) {
       run_chain()
     }
@@ -152,10 +230,19 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
       withr::with_seed(control$seed + chain, run_chain())
     }
 
+    rej_by_chain[[chain]] <- tally_diff(tally_counts(tally), before)
+
     beta_all <- matrix(unlist(mcmc$extra.values), ncol = p, nrow = total, byrow = TRUE)
     beta_samples[chain, , ] <- beta_all[keep, , drop = FALSE]
     epsilon_samples[chain, , ] <- cbind(mcmc$samples, mcmc$log.p)[keep, , drop = FALSE]
     acc[chain] <- mcmc$acceptance.rate
+  }
+
+  rejected <- tally_counts(tally)
+  if(sum(rejected) > 0.5 * control$chains * total) {
+    warning("More than half of all proposals fell outside the epsilon support ",
+            paste(names(rejected), rejected, sep = "=", collapse = ", "),
+            "). Tune `scale`/`warmup.", call. = FALSE)
   }
 
   vars <- beta_variable_names(problem, control$labels)
@@ -168,8 +255,39 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
     diagnostics = bayes_diagnostics(new_draws_array(beta_samples, vars)),
     acc_rate = mean(acc),
     acc_rate_by_chain = acc,
+    rejected = rejected,
+    rejected_by_chain = rej_by_chain,
     scale = scale,
     scale_auto = is.null(control$scale),
+    eps_max = control$eps_max, min_ess = control$min_ess, K_Q_max = support$K_Q_max,
     warmup = control$warmup
   )
+}
+
+#' Mutable counter for rejected MCMC proposals
+#' @noRd
+
+new_bayes_tally <- function() {
+  t <- new.env(parent = emptyenv())
+  t$n <- list()
+  t
+}
+
+tally_counts <- function(tally) {
+  if(is.null(tally) || length(tally$n) == 0L) return(integer(0))
+  unlist(tally$n)
+}
+
+tally_get <- function(counts, name) {
+  out <- integer(length(name))
+  names(out) <- name
+  common <- intersect(name, names(counts))
+  out[common] <- as.integer(counts[common])
+  out
+}
+
+tally_diff <- function(after, before) {
+  name <- union(names(after), names(before))
+  if(length(name) == 0L) return(integer(0))
+  tally_get(after, name) - tally_get(before, name)
 }
