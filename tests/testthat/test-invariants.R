@@ -216,6 +216,77 @@ test_that("clever directions are consistent with dB_dpsi", {
   check(w / sum(w), "non-uniform Q")
 })
 
+test_that("B_wls agrees with the LBFGS solve for CATE", {
+  data <- sim1_data(n = 100L)
+  nu <- oracle_nuisance_cate(data)
+  it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = "linear"))
+
+  pre <- new_B_wls(it$problem)
+
+  expect_false(is.null(pre))
+
+  for(i in seq_len(10L)) {
+    Q <- runif(it$problem$n, 0.5, 2)
+    Q <- Q / sum(Q)
+
+    psi <- matrix(rnorm(it$problem$n * it$problem$K), it$problem$n, it$problem$K)
+    fast <- B_wls(pre, psi, Q)$beta
+    slow <- as.numeric(B(it$problem$Lm_fn, as_float_tensor(psi)$requires_grad_(TRUE), it$problem$design_matrix, torch::torch_tensor(Q), it$problem$p))
+    expect_equal(fast, slow, tolerance = 1e-4)
+
+    g <- dL(it$problem$Lm_fn, as_float_tensor(psi), leaf(fast), it$problem$design_matrix, weight = torch::torch_tensor(Q))[[1]]
+    expect_lt(max(abs(as.numeric(g))), 1e-6)
+  }
+})
+
+test_that("dQ_deps_wls matches dQ_fluctuation_depsilon", {
+  set.seed(1)
+  n <- 40L
+  p <- 2L
+  Kf <- matrix(rnorm(n * p), n, p)
+  Q <- runif(n, 0.5, 2)
+  Q <- Q / sum(Q)
+  for(e in list(rep(0, p), c(0.11, -0.08), c(-0.4, 0.5))) {
+    Qt <- Q_fluctuation(torch::torch_tensor(e), torch::torch_tensor(Kf), torch::torch_tensor(Q))
+    got <- dQ_deps_wls(Kf, as.numeric(Qt))
+    want <- as.matrix(dQ_fluctuation_depsilon(torch::torch_tensor(e), torch::torch_tensor(Kf), torch::torch_tensor(Q))$detach())
+    expect_equal(got, want, tolerance = 1e-5, ignore_attr = TRUE)
+    expect_lt(max(abs(colSums(got))), 1e-6)
+  }
+})
+
+test_that("bayes_jacobian_wls matches the torch Jacobian", {
+  data <- sim1_data(n = 100L)
+  nu <- oracle_nuisance_cate(data)
+  it <- cate_internals(data, nu, formula = ~X4, tmle = TRUE)
+  problem <- it$problem
+  spec <- it$spec
+
+  pre <- problem$B_wls
+  pre$K_Q <- as.matrix(it$fit$final$K_Q)
+  step <- spec$steps(problem)[[1]]
+  step$fluctuate_Q <- TRUE
+
+  clever <- scale_bayes_clever(problem, spec, it$fit$state, it$fit$final$clever, linear = TRUE)
+
+  for(e in list(c(0.02, -0.03), c(-0.05, 0.03), c(0.08, 0.06))) {
+    et <- torch::torch_tensor(e)
+    st <- spec$apply_update(problem, step, it$fit$state, et, clever, it$fit$final$K_Q, linear = TRUE)
+
+    psi <- spec$psi_from_state(problem, st)
+    pm <- as.matrix(psi$detach())
+    sol <- B_wls(pre, pm, as.numeric(st$Q))
+    b <- torch::torch_tensor(sol$beta, requires_grad = TRUE)
+    dps <- spec$dpsi_depsilon(problem, st, clever, et, linear = TRUE)
+
+    slow <- bayes_jacobian(problem, psi, it$fit$state$Q, st$Q, b, dps, et, it$fit$final$K_Q)
+    fast <- bayes_jacobian_wls(pre, sol, pm, st$Q, dps, dQ_deps_wls(pre$K_Q, st$Q))
+
+    expect_equal(fast, as.matrix(slow$detach()), tolerance = 1e-5, ignore_attr = TRUE)
+    expect_equal(log_abs_det(fast), log_abs_det(slow), tolerance = 1e-5)
+  }
+})
+
 # ----- EIF -----
 
 test_that("eif() equals the closed-form EIF elementwise (~1)", {
@@ -364,7 +435,7 @@ test_that("every mu component responds to epsilon, and eps = 0 is identity", {
 
       # (M1a): fluctuation is identity at epsilon = 0
 
-      z <- spec$apply_update(problem, step, state0, torch::torch_zeros(problem$p), it$clever0, it$K_Q0)
+      z <- spec$apply_update(problem, step, state0, torch::torch_zeros(problem$p), it$clever0, it$K_Q0, linear = linear)
 
       for(name in names(state0$mu)) {
         expect_equal(as.array(z$mu[[name]]), as.array(state0$mu[[name]]),
@@ -373,7 +444,7 @@ test_that("every mu component responds to epsilon, and eps = 0 is identity", {
 
       # Every component must actually move.
       eps <- torch::torch_tensor(rep(0.25, problem$p))
-      s1 <- spec$apply_update(problem, step, state0, eps, it$clever0, it$K_Q0)
+      s1 <- spec$apply_update(problem, step, state0, eps, it$clever0, it$K_Q0, linear = linear)
       for(name in names(state0$mu)) {
         expect_gt(max(abs(as.array(s1$mu[[name]]) - as.array(state0$mu[[name]]))), 1e-1) # mu should move a lot
       }
@@ -394,17 +465,20 @@ test_that("The Jacobian dbeta/deps equals P0[lambda*]", {
 
   e0 <- torch::torch_tensor(rep(0, p))
   st <- it$spec$apply_update(it$problem, list(id = 1L, fluctuate_Q = TRUE),
-                             it$fit$state, e0, fn$clever, fn$K_Q)
+                             it$fit$state, e0, fn$clever, fn$K_Q, linear = FALSE)
 
   psi <- it$spec$psi_from_state(it$problem, st)
   beta <- B(it$problem$Lm_fn, psi, it$problem$design_matrix, st$Q, p)
-  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0)
+  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0, linear = FALSE)
   J <- as.matrix(bayes_jacobian(it$problem, psi, it$fit$state$Q, st$Q, beta, dpsi, e0, fn$K_Q)$detach())
 
   # Analytical jacobian for CATE + linear working model + squared error loss
   X   <- cbind(1, data$X4)
-  Sig <- crossprod(X) / n; Si <- solve(Sig)
-  m1  <- as.numeric(st$mu$a1); m0 <- as.numeric(st$mu$a0); pp <- nu$pi
+  Sig <- crossprod(X) / n
+  Si <- solve(Sig)
+  m1  <- as.numeric(st$mu$a1)
+  m0 <- as.numeric(st$mu$a0)
+  pp <- nu$pi
   w   <- m1 * (1 - m1) / pp + m0 * (1 - m0) / (1 - pp)
   r   <- (m1 - m0) - as.vector(X %*% it$tmle$est)
 
@@ -415,7 +489,7 @@ test_that("The Jacobian dbeta/deps equals P0[lambda*]", {
   e0   <- torch::torch_tensor(rep(0, it$problem$p))
   psi  <- it$spec$psi_from_state(it$problem, st)
   beta <- B(it$problem$Lm_fn, psi, it$problem$design_matrix, st$Q, it$problem$p)
-  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0)
+  dpsi <- it$spec$dpsi_depsilon(it$problem, st, fn$clever, e0, linear = FALSE)
 
   Jpsi <- as.matrix(bayes_jacobian(it$problem, psi, st$Q, st$Q, beta, dpsi, e0,
                                    fn$K_Q, include_Q = FALSE)$detach())

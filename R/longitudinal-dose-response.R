@@ -126,7 +126,7 @@ longitudinal_dose_response <- function(
     engine, nuisance
   )
 
-  spec <- msm_spec_longitudinal_dose_response(tmle_linear = tmle$linear)
+  spec <- msm_spec_longitudinal_dose_response()
 
   res <- fit_msm(
     problem, spec,

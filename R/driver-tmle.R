@@ -45,7 +45,7 @@ run_tmle <- function(problem, spec, control, state, verbose = FALSE) {
       K_Q <- calculate_K(problem$Lm_fn, psi, state$beta,
                          problem$design_matrix, Minv, problem$batched_beta)
       clever <- spec$make_clever(problem, step, state, psi, Minv)
-      clever$offset <- spec$fluctuation_offset(problem, step, state)
+      clever$offset <- spec$fluctuation_offset(problem, step, state, control$linear)
 
       sol <- solve_fluctuation(problem, spec, control, step, state, clever, K_Q)
       eps <- sol$epsilon_t
@@ -76,7 +76,7 @@ run_tmle <- function(problem, spec, control, state, verbose = FALSE) {
         break
       }
 
-      state <- spec$apply_update(problem, step, state, eps, clever, K_Q)
+      state <- spec$apply_update(problem, step, state, eps, clever, K_Q, control$linear)
     }
 
     if(!sweep_ok) break
@@ -109,7 +109,7 @@ run_tmle <- function(problem, spec, control, state, verbose = FALSE) {
     Minv_f <- normalizing_matrix(problem$Lm_fn, psi_f, state$beta,
                                  problem$design_matrix, state$Q, problem$p)
     clever_f <- spec$make_clever(problem, steps[[1]], state, psi_f, Minv_f)
-    clever_f$offset <- spec$fluctuation_offset(problem, steps[[1]], state)
+    clever_f$offset <- spec$fluctuation_offset(problem, steps[[1]], state, control$linear)
 
     final <- list(
       psi = psi_f,
@@ -128,7 +128,7 @@ run_tmle <- function(problem, spec, control, state, verbose = FALSE) {
        final = final)
 }
 
-finalize_tmle <- function(problem, spec, fit) {
+finalize_tmle <- function(problem, spec, fit, control) {
   n <- problem$n
   p <- problem$p
 
@@ -163,6 +163,8 @@ finalize_tmle <- function(problem, spec, fit) {
     iter = fit$iter,
     solved = d$ratio,
     solver_log = fit$solver_log,
-    design_invariant = problem$design_invariant
+    design_invariant = problem$design_invariant,
+    fluctuation = control$fluctuation,
+    linear = control$linear
   )
 }

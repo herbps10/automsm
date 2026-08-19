@@ -103,6 +103,59 @@ probe_design_invariance <- function(problem, reps = 3L, tol = 1e-6) {
   }, logical(1)))
 }
 
+#' Probe whether the working model is affine in beta (m_beta(x) = beta' x)
+#' @noRd
+probe_affine_working_model <- function(problem, tol = 1e-5) {
+  if(problem$p != problem$d) return(FALSE)
+  n <- problem$n
+  K <- problem$K
+  p <- problem$p
+
+  Xf <- matrix(as.array(problem$design_matrix), nrow = n * K)
+
+  ok <- function(b) {
+    got <- as.array(problem$working_model(torch::torch_tensor(b), problem$design_matrix))
+    want <- matrix(Xf %*% b, nrow = n, ncol = K)
+    isTRUE(all.equal(got, want, tolerance = tol, check.attributes = FALSE))
+  }
+
+  ok(rep(0, p)) && ok(seq_len(p) / p) && ok(-rev(seq_len(p)) / (2 * p))
+}
+
+#' Recover the per-component weights h_k if the loss is weighted squared error
+#'
+#' Returns NULL if L(a, b) != sum_h h_k (a_k - b_k)^2, in which case the caller
+#' falls back to an interative solve. This covers loss_squared_error and
+#' loss_weighted_sum(loss_squared_error, weights)
+#' @noRd
+probe_loss_weights <- function(problem, tol = 1e-6) {
+  K <- problem$K
+  z <- torch::torch_zeros(c(1L, K))
+  h <- vapply(seq_len(K), function(k) {
+    e <- torch::torch_zeros(c(1L, K))
+    e[1, k] <- 1
+    as.numeric(problem$loss(z, e)$sum())
+  }, numeric(1))
+
+  if(any(!is.finite(h)) || any(h < 0)) return(NULL)
+
+  a <- matrix(seq(-1, 1, length.out = K), 1L, K)
+  b <- matrix(seq(2, -2, length.out = K), 1L, K)
+  got <- as.numeric(problem$loss(torch::torch_tensor(a), torch::torch_tensor(b))$sum())
+  if(!isTRUE(all.equal(got, sum(h * (a - b)^2), tolerance = tol))) return(NULL)
+  h
+}
+
+#' Calc design-dependent parts of B() out of the MCMC
+#' @noRd
+new_B_wls <- function(problem) {
+  h <- probe_loss_weights(problem)
+  if(is.null(h) || !probe_affine_working_model(problem)) return(NULL)
+  n <- problem$n
+  K <- problem$K
+  list(X = matrix(as.array(problem$design_matrix), nrow = n * K), hrep = rep(h, each = n), n = n, K = K, problem = problem$p)
+}
+
 new_msm_problem <- function(estimand, K, d, p, tau = 1L,
                             design_matrix, Q0, Yt, Lm_fn,
                             loss, working_model, formula, terms,
@@ -125,6 +178,7 @@ new_msm_problem <- function(estimand, K, d, p, tau = 1L,
     class = "msm_problem"
   )
 
+  problem$B_wls <- new_B_wls(problem)
   problem$design_invariant <- probe_design_invariance(problem)
 
   problem

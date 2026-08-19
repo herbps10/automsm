@@ -129,7 +129,8 @@ test_that("dose_response continous binary Bayes TMLE fixture is stable", {
     bayes = bayes_control(
       chains = 2,
       draws = 100,
-      warmup = 100
+      warmup = 100,
+      fluctuation = "logistic"
     ),
     nuisance_estimates = fx$nuisance
   ))
@@ -210,8 +211,7 @@ test_that("dose-response Bayes TMLE runs on continuous linear simulated data", {
     bayes = bayes_control(
       chains = 1,
       draws = 100,
-      warmup = 200,
-      scale = 1e-1
+      warmup = 200
     )
   ))
 
@@ -220,7 +220,7 @@ test_that("dose-response Bayes TMLE runs on continuous linear simulated data", {
   expect_true(is.finite(fit$bayes_tmle$acc_rate))
 })
 
-test_that("dose-response Bayes TMLE agrees with frequentist TMLE with multiple treatments", {
+test_that("dose-response Bayes TMLE BvM holds with multiple treatments", {
   dat <- simulate_dose_response(N = 500, treatments = 6, sigma = 0.1, seed = 1, nonlinear = FALSE, binary = FALSE)
   set.seed(1)
   fit <- suppressWarnings(dose_response(
@@ -253,7 +253,7 @@ test_that("dose_response gradient of the log-loss equals the summed EIF", {
   nu <- oracle_nuisance_dose_response(data)
   for(tmle_linear in c(FALSE, TRUE)) {
     it <- dose_response_internals(data, nu, formula = ~A, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
-    logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+    logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar, tmle_linear)
     g <- autograd_gradient(logf, torch::torch_tensor(rep(0, it$problem$p)))
     se <- it$tmle$se * it$problem$n
     expect_lt(max(abs(abs(g) - abs(colSums(it$tmle$eif))) / se), 1e-3)
@@ -279,7 +279,7 @@ test_that("(B2) holds exactly against the conditional variance for dose_response
   nu <- oracle_nuisance_dose_response(data)
   tmle_linear <- FALSE
   it <- dose_response_internals(data, nu, formula = ~1 + A, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
-  logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+  logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar, linear = tmle_linear)
 
   H <- hessian_from_gradient(logf, rep(0, it$problem$p))
   expect_lt(attr(H, "asymmetry"), 1e-4)
@@ -299,27 +299,30 @@ test_that("(B2) holds statistically against the empirical EIF for dose_response"
   expect_lt(max(abs(R - diag(nrow(R)))), 10 / sqrt(n))
 })
 
-test_that("dose_response generalized posterior with binary outcome concentrates as predicted by BvM", {
+test_that("dose_response generalized posterior with binary outcome and linear or logistic fluctuation concentrates as predicted by BvM", {
   data <- sim1_data(n = 1e3)
-  suppressWarnings(fit <- dose_response(
-    data,
-    X = paste0("X", 1:4), A = "A", Y = "Y",
-    formula = ~1 + A,
-    nuisance_estimates = oracle_nuisance_dose_response(data),
-    outcome_type = "binomial",
-    tmle = TRUE,
-    bayes = bayes_control(
-      chains = 2,
-      warmup = 500,
-      draws = 500,
-      seed = 101
-    )
-  ))
+  for(bayes_fluctuation in c("linear", "logistic")) {
+    suppressWarnings(fit <- dose_response(
+      data,
+      X = paste0("X", 1:4), A = "A", Y = "Y",
+      formula = ~1 + A,
+      nuisance_estimates = oracle_nuisance_dose_response(data),
+      outcome_type = "binomial",
+      tmle = TRUE,
+      bayes = bayes_control(
+        chains = 2,
+        warmup = 500,
+        draws = 500,
+        seed = 101,
+        fluctuation = bayes_fluctuation
+      )
+    ))
 
-  s <- fit$bayes_tmle$diagnostics
+    s <- fit$bayes_tmle$diagnostics
 
-  expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
-  expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
+    expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
+    expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
+  }
 })
 
 test_that("dose_response generalized posterior with continuous outcome concentrates as predicted by BvM", {

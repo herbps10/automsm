@@ -1,4 +1,4 @@
-msm_spec_longitudinal_dose_response <- function(tmle_linear = TRUE) {
+msm_spec_longitudinal_dose_response <- function() {
   new_msm_spec(
     estimand = "longitudinal_dose_response",
     supports_bayes = FALSE,

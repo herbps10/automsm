@@ -32,7 +32,7 @@ fit_msm <- function(problem, spec,
   fit <- NULL
   if(tmle$enabled) {
     fit <- spec$driver(problem, spec, tmle, state0)
-    tmle_res <- finalize_tmle(problem, spec, fit)
+    tmle_res <- finalize_tmle(problem, spec, fit, tmle)
   }
 
   bayes_res <- if(bayes$enabled) {

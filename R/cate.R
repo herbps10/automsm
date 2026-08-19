@@ -29,7 +29,7 @@ cate <- function(
 ) {
   nuisance <- as_nuisance_control(nuisance)
   tmle <- resolve_fluctuation(as_tmle_control(tmle), outcome_type)
-  bayes <- as_bayes_control(bayes)
+  bayes <- resolve_fluctuation(as_bayes_control(bayes), outcome_type)
   onestep <- as_onestep_control(onestep)
 
   validate_msm_arguments(
@@ -44,7 +44,7 @@ cate <- function(
       Y,
       nuisance,
       outcome_type,
-      estimate_conditional_variance = isTRUE(bayes$enabled) && isTRUE(tmle$linear)
+      estimate_conditional_variance = bayes$enabled
     )
   }
 

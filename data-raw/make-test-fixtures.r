@@ -23,7 +23,7 @@ make_cate_fixture <- function(path, binary, nonlinear) {
       epsilon = 1e-5
     ),
     outcome_type = outcome_type,
-    estimate_conditional_variance = (outcome_type == "continuous")
+    estimate_conditional_variance = TRUE
   )
 
   fit_onestep <- cate(
@@ -103,7 +103,7 @@ make_dose_response_fixture <- function(path, binary, nonlinear) {
       epsilon = 1e-5
     ),
     outcome_type = outcome_type,
-    estimate_conditional_variance = (outcome_type == "continuous")
+    estimate_conditional_variance = TRUE
   )
 
   fit_onestep <- dose_response(

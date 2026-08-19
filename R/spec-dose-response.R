@@ -1,18 +1,16 @@
 msm_spec_dose_response <- function(tmle_linear = TRUE) {
-  tmle_loss <- if(tmle_linear) {
+  tmle_loss_linear <- {
     f <- torch::nn_mse_loss(reduction = "sum")
     function(x, y) 0.5 * f(x, y)
   }
-  else {
-    torch::nn_bce_with_logits_loss(reduction = "sum")
-  }
+  tmle_loss_logistic <- torch::nn_bce_with_logits_loss(reduction = "sum")
 
   new_msm_spec(
     estimand = "dose_response",
     tol = 1e-2,
     nan_guard = TRUE,
     supports_bayes = TRUE,
-    tmle_loss = tmle_loss,
+    #tmle_loss = tmle_loss,
 
     init_state = function(problem) {
       list(
@@ -44,8 +42,8 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       )
     },
 
-    fluctuation_offset = function(problem, step, state) {
-      if(tmle_linear) state$mu$obs else state$mu$obs$logit()
+    fluctuation_offset = function(problem, step, state, linear) {
+      if(linear) state$mu$obs else state$mu$obs$logit()
     },
 
     fluctuation_glm = function(problem, step, state, clever) {
@@ -54,14 +52,15 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
            target = as.numeric(problem$Yt))
     },
 
-    mu_loss = function(epsilon, problem, step, state, clever) {
-      tmle_loss(clever$offset + clever$obs$matmul(epsilon), problem$Yt)
+    mu_loss = function(epsilon, problem, step, state, clever, linear) {
+      p <- clever$offset + clever$obs$matmul(epsilon)
+      if(linear) tmle_loss_linear(p, problem$Yt) else tmle_loss_logistic(p, problem$Yt)
     },
 
-    apply_update = function(problem, step, state, epsilon, clever, K_Q) {
+    apply_update = function(problem, step, state, epsilon, clever, K_Q, linear) {
       obs_lin <- clever$obs$matmul(epsilon)
       arms_lin <- clever$arms$matmul(epsilon)
-      if(tmle_linear) {
+      if(linear) {
         obs <- state$mu$obs + obs_lin
         arms <- state$mu$arms + arms_lin
       }
@@ -82,10 +81,10 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       )
     },
 
-    dpsi_depsilon = function(problem, state, clever, epsilon) {
+    dpsi_depsilon = function(problem, state, clever, epsilon, linear) {
       n <- problem$n
       lapply(seq_len(problem$K), function(k) {
-        if(tmle_linear) {
+        if(linear) {
           clever$arms[, k, ]
         }
         else {
@@ -95,8 +94,8 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       })
     },
 
-    bayes_clever_scale = function(problem, state) {
-      if(tmle_linear == FALSE) return(NULL)
+    bayes_clever_scale = function(problem, state, linear) {
+      if(linear == FALSE) return(NULL)
 
       nu <- problem$nuisance_estimates
       list(
@@ -105,16 +104,16 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
       )
     },
 
-    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar) {
+    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar, linear) {
       logQ <- Q_eps$log()$sum()
-      if(tmle_linear) {
+      if(linear) {
         pred <- state$mu$obs + clever$obs$matmul(epsilon)
         stopifnot(!is.null(condvar))
         -((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum() + logQ
       }
       else {
         lg <- state$mu$obs$logit() + clever$obs$matmul(epsilon)
-        -tmle_loss(lg, problem$Yt) + logQ
+        -tmle_loss_logistic(lg, problem$Yt) + logQ
       }
     },
 
@@ -128,8 +127,8 @@ msm_spec_dose_response <- function(tmle_linear = TRUE) {
           nuisance_field("pi", n, lower = 0, upper = 1),
           nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu_a", c(n, K), lower = b$lo, upper = b$hi, severity = "warning"),
-          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear),
-          nuisance_field("condvar_a", c(n, K), required = bayes_enabled && tmle_linear)
+          nuisance_field("condvar", n, required = bayes_enabled),
+          nuisance_field("condvar_a", c(n, K), required = bayes_enabled)
         ),
         checks = list(
           function(nu, problem) {

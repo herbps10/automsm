@@ -93,7 +93,14 @@ estimate_point_nuisance <- function(
       mu_a_hat[valid, k] <- res$pred[[k]]
     }
 
-    if (isTRUE(estimate_conditional_variance)) {
+    if(identical(outcome_type, "binomial")) {
+      # For binary outcomes, closed form for conditional variance is available
+      for(k in seq_len(K)) {
+        condvar_a_hat[valid, k] <- mu_a_hat[valid, k] * (1 - mu_a_hat[valid, k])
+      }
+    }
+    else if (isTRUE(estimate_conditional_variance)) {
+      # Otherwise, only estimate conditional variance if requested
       yhat <- res$pred[["train"]]
       y2 <- (data[[Y]][train] - yhat)^2
 

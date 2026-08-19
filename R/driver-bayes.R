@@ -1,5 +1,4 @@
 
-
 #' Initial proposal covariance for the generalized posterior
 #'
 #' The Bayesian submodel is set up so the score at eps = 0 equals
@@ -64,8 +63,8 @@ resolve_bayes_support <- function(problem, control, K_Q, epsilon_init) {
 
 #' Scales clever covariates for Bayesian log likelihood
 #' @noRd
-scale_bayes_clever <- function(problem, spec, state, clever) {
-  clever_scale <- spec$bayes_clever_scale(problem, state)
+scale_bayes_clever <- function(problem, spec, state, clever, linear) {
+  clever_scale <- spec$bayes_clever_scale(problem, state, linear)
   if(is.null(clever_scale)) return(clever)
   n <- problem$n
   K <- problem$K
@@ -107,6 +106,51 @@ bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon
   jac <- jac + J_Q$transpose(1, 2)$matmul(dQ_fluctuation_depsilon(epsilon, K_Q, Q_base))
 }
 
+#' @noRd
+bayes_jacobian_wls <- function(pre, sol, psi, Q, dpsi_list, dQ_deps = NULL) {
+  n <- pre$n
+  K <- pre$K
+  p <- pre$p
+  Ai <- chol2inv(sol$chol)
+  Qv <- as.numeric(Q)
+  stopifnot(length(Qv) == n, length(dpsi_list) == K)
+
+  w <- rep(Qv, times = K) * pre$hrep
+  r <- as.numeric(psi) - as.vector(pre$X %*% sol$beta)
+
+  D <- do.call(rbind, lapply(dpsi_list, function(d) {
+    if(inherits(d, "torch_tensor")) as.matrix(d$detach()) else as.matrix(d)
+  }))
+  stopifnot(identical(dim(D), c(n * K, p)))
+  M <- crossprod(pre$X * w, D)
+
+  if(!is.null(dQ_deps)) {
+    Xw <- pre$X * (pre$hrep * r)
+    G <- matrix(0, n, p)
+    for(k in seq_len(K)) G <- G + Xw[(k - 1L) * n + seq_len(n), , drop = FALSE]
+    M <- M + crossprod(G, dQ_deps)
+  }
+
+  Ai %*% M
+}
+
+#' Jacobian of the Q-fluctuation in base R
+#' @noRd
+dQ_deps_wls <- function(K_mat, Q_eps) {
+  Qt <- as.numeric(Q_eps)
+  n <- length(Qt)
+  cs <- as.vector(crossprod(K_mat, Qt))
+  Qt * (K_mat - rep(cs, each = n))
+}
+
+#' @noRd
+log_abs_det <- function(J) {
+  if(inherits(J, "torch_tensor")) return(as.numeric(J$det()$abs()$log()))
+  d <- determinant(J, logarithm = TRUE)
+  if(!is.finite(d$modulus)) return(NA_real_)
+  as.numeric(d$modulus)
+}
+
 #' Generalized Bayesian log-density of the fluctuation parameter
 #'
 #' The generalized posterior is
@@ -115,7 +159,7 @@ bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon
 #' Returns the list expected by AdaptMCMC: the first element is the
 #' log-density, remaining elements are recorded in `extra.values`
 #' @noRd
-bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior, beta_init = NULL, control = NULL, tally = NULL) {
+bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior, linear, beta_init = NULL, control = NULL, tally = NULL) {
   p <- problem$p
 
   reject <- function(reason) {
@@ -129,31 +173,51 @@ bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condva
 
   step <- spec$steps(problem)[[1]]
 
-  clever_b <- scale_bayes_clever(problem, spec, state, clever)
+  clever_b <- scale_bayes_clever(problem, spec, state, clever, linear)
 
-  st <- spec$apply_update(problem, step, state, epsilon, clever_b, K_Q)
+  st <- spec$apply_update(problem, step, state, epsilon, clever_b, K_Q, linear)
 
   # Effective sample size of Q_eps: n at uniform, 1 at a point mass
   ess <- 1 / sum(as.numeric(st$Q)^2)
   if(ess < (control$min_ess %||% 0)) return(reject("low_ess"))
 
   psi <- spec$psi_from_state(problem, st)
-  beta <- B(problem$Lm_fn, psi, problem$design_matrix, st$Q, problem$p, init = beta_init)
 
-  if(!all(is.finite(as.numeric(beta)))) return(reject("nonfinite_beta"))
+  fast <- problem$B_wls
+  fast_ok <- !is.null(fast) && !identical(getOption("automsm.B_wls"), FALSE)
+  psi_mat <- as.matrix(psi$detach())
+  if(fast_ok) {
+    fast_sol <- B_wls(fast, as.matrix(psi), as.numeric(st$Q))
+    if(is.null(fast_sol)) return(reject("singular_hessian"))
+    beta_num <- fast_sol$beta
+  }
+  else {
+    beta <- B(problem$Lm_fn, psi, problem$design_matrix, st$Q, problem$p, init = beta_init)
+    beta_num <- as.numeric(beta)
+  }
 
-  loglik <- as.numeric(spec$bayes_loglik(epsilon, problem, state, clever_b, st$Q, condvar))
-  dpsi <- spec$dpsi_depsilon(problem, st, clever_b, epsilon)
-  jac <- bayes_jacobian(problem, psi, state$Q, st$Q, beta, dpsi, epsilon, K_Q)
+  if(!all(is.finite(beta_num))) return(reject("nonfinite_beta"))
+
+  loglik <- as.numeric(spec$bayes_loglik(epsilon, problem, state, clever_b, st$Q, condvar, linear = linear))
+  dpsi <- spec$dpsi_depsilon(problem, st, clever_b, epsilon, linear = linear)
+
+  if(fast_ok) {
+    dQ <- dQ_deps_wls(fast$K_Q, st$Q)
+    jac <- bayes_jacobian_wls(fast, fast_sol, as.matrix(psi), st$Q, dpsi, dQ)
+  }
+  else {
+    jac <- bayes_jacobian(problem, psi, state$Q, st$Q, beta, dpsi, epsilon, K_Q)
+  }
+
   if(is.null(jac)) return(reject("singular_hessian"))
 
-  ld <- as.numeric(jac$det()$abs()$log())
+  ld <- log_abs_det(jac)
   if(!is.finite(ld)) return(reject("singular_jacobian"))
 
-  target <- loglik + prior(as.numeric(beta)) + ld
+  target <- loglik + prior(beta_num) + ld
   if(!is.finite(target)) return(reject("nonfinite_target"))
 
-  list(log.density = as.numeric(target), beta = as.numeric(beta))
+  list(log.density = as.numeric(target), beta = beta_num)
 }
 
 #' @noRd
@@ -177,12 +241,15 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
 
   beta_init <- as.numeric(fit$state$beta)
 
+
+  if(!is.null(problem$B_wls)) problem$B_wls$K_Q <- as.matrix(fit$final$K_Q)
+
   tally <- new_bayes_tally()
   eval_density <- function(epsilon, tally_env) {
     bayes_log_density(
       torch::torch_tensor(epsilon), problem, spec, fit$state,
       final$clever, final$K_Q, condvar,
-      prior = control$prior, control = control, tally = tally_env, beta_init = beta_init
+      prior = control$prior, linear = control$linear, control = control, tally = tally_env, beta_init = beta_init
     )
   }
   log_dens <- function(epsilon) eval_density(epsilon, tally)
@@ -261,7 +328,9 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
     scale = scale,
     scale_auto = is.null(control$scale),
     eps_max = control$eps_max, min_ess = control$min_ess, K_Q_max = support$K_Q_max,
-    warmup = control$warmup
+    warmup = control$warmup,
+    linear = control$linear,
+    fluctuation = control$fluctuation
   )
 }
 

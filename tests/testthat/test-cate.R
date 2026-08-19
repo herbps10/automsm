@@ -96,10 +96,13 @@ test_that("cate continous linear Bayes TMLE fixture is stable", {
     bayes = bayes_control(
       chains = 2,
       draws = 100,
-      warmup = 100
+      warmup = 100,
+      fluctuation = "linear"
     ),
     nuisance_estimates = fx$nuisance_estimates
   ))
+
+  expect_equal(fit$bayes_tmle$fluctuation, "linear")
 
   expect_equal(
     apply(fit$bayes_tmle$draws, 3, mean),
@@ -126,9 +129,16 @@ test_that("cate continous binary Bayes TMLE fixture is stable", {
     formula = ~1 + X2,
     outcome_type = "binomial",
     tmle = TRUE,
-    bayes = bayes_control(chains = 2, draws = 100, warmup = 100),
+    bayes = bayes_control(
+      chains = 2,
+      draws = 100,
+      warmup = 100,
+      fluctuation = "logistic"
+    ),
     nuisance_estimates = fx$nuisance_estimates
   ))
+
+  expect_equal(fit$bayes_tmle$fluctuation, "logistic")
 
   expect_equal(
     apply(fit$bayes_tmle$draws, 3, mean),
@@ -267,7 +277,7 @@ test_that("gradient of the log-loss equals the summed EIF", {
   nu <- oracle_nuisance_cate(data)
   for(tmle_linear in c(FALSE, TRUE)) {
     it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
-    logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+    logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar, linear = tmle_linear)
     g <- autograd_gradient(logf, torch::torch_tensor(rep(0, it$problem$p)))
     se <- it$tmle$se * it$problem$n
     expect_lt(max(abs(abs(g) - abs(colSums(it$tmle$eif))) / se), 1e-3)
@@ -293,7 +303,7 @@ test_that("(B2) holds exactly against the conditional variance for cate", {
   nu <- oracle_nuisance_cate(data)
   tmle_linear <- FALSE
   it <- cate_internals(data, nu, formula = ~X4, tmle = tmle_control(fluctuation = if(tmle_linear) "linear" else "logistic"))
-  logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar)
+  logf <- bayes_loglik_at(it$problem, it$spec, it$fit, it$condvar, linear = tmle_linear)
 
   H <- hessian_from_gradient(logf, rep(0, it$problem$p))
   expect_lt(attr(H, "asymmetry"), 1e-4)
@@ -313,30 +323,33 @@ test_that("(B2) holds statistically against the empirical EIF for cate", {
   expect_lt(max(abs(R - diag(nrow(R)))), 10 / sqrt(n))
 })
 
-test_that("cate generalized posterior with binary outcome concentrates as predicted by BvM", {
+test_that("cate generalized posterior with binary outcome and logistic or linear fluctuations concentrates as predicted by BvM", {
   data <- sim1_data(n = 1e3L)
-  suppressWarnings(fit <- cate(
-    data,
-    X = paste0("X", 1:4), A = "A", Y = "Y",
-    formula = ~X4,
-    nuisance_estimates = oracle_nuisance_cate(data),
-    outcome_type = "binomial",
-    tmle = tmle_control(fluctuation = "logistic"),
-    bayes = bayes_control(
-      chains = 2,
-      warmup = 500,
-      draws = 500,
-      seed = 101
-    )
-  ))
+  for(bayes_fluctuation in c("linear", "logistic")) {
+    suppressWarnings(fit <- cate(
+      data,
+      X = paste0("X", 1:4), A = "A", Y = "Y",
+      formula = ~X4,
+      nuisance_estimates = oracle_nuisance_cate(data),
+      outcome_type = "binomial",
+      tmle = tmle_control(fluctuation = "logistic"),
+      bayes = bayes_control(
+        chains = 2,
+        warmup = 500,
+        draws = 500,
+        seed = 101,
+        fluctuation = bayes_fluctuation
+      )
+    ))
 
-  fit$bayes_tmle$acc_rate_by_chain
+    expect_equal(fit$bayes_tmle$linear, bayes_fluctuation == "linear")
+    expect_equal(fit$bayes_tmle$fluctuation, bayes_fluctuation)
 
-  s <- fit$bayes_tmle$diagnostics
-
-  expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
-  expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
-  expect_true(all(s$rhat < 1.05))
+    s <- fit$bayes_tmle$diagnostics
+    expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
+    expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
+    expect_true(all(s$rhat < 1.05))
+  }
 })
 
 test_that("cate generalized posterior with continuous outcome concentrates as predicted by BvM", {
@@ -363,6 +376,41 @@ test_that("cate generalized posterior with continuous outcome concentrates as pr
   expect_true(all(s$rhat < 1.05))
 })
 
+test_that("cate posterior is unchanged by fast path", {
+  data <- sim1_data(n = 1e3L)
+  for(bayes_fluctuation in c("linear", "logistic")) {
+    fit <- function() {
+      suppressWarnings(cate(
+        data,
+        X = paste0("X", 1:4), A = "A", Y = "Y",
+        formula = ~X4,
+        nuisance_estimates = oracle_nuisance_cate(data),
+        outcome_type = "binomial",
+        tmle = tmle_control(fluctuation = "logistic"),
+        bayes = bayes_control(
+          chains = 2,
+          warmup = 200,
+          draws = 200,
+          seed = 101,
+          fluctuation = bayes_fluctuation
+        )
+      ))
+    }
+    a <- fit()
+    b <- withr::with_options(list(automsm.B_wls = FALSE), fit())
+
+    expect_equal(a$bayes_tmle$linear, bayes_fluctuation == "linear")
+    expect_equal(a$bayes_tmle$fluctuation, bayes_fluctuation)
+    expect_equal(b$bayes_tmle$linear, bayes_fluctuation == "linear")
+    expect_equal(b$bayes_tmle$fluctuation, bayes_fluctuation)
+
+    sa <- a$bayes_tmle$diagnostics
+    sb <- b$bayes_tmle$diagnostics
+    expect_equal(sa$mean, sb$mean, tolerance = 1e-1)
+    expect_equal(sa$sd, sb$sd, tolerance = 1e-1)
+  }
+})
+
 # ------ Newton solver -----
 test_that("analytic GLM agrees with spec$mu_loss (value and gradient)", {
   data <- sim1_data(n = 500L)
@@ -378,15 +426,15 @@ test_that("analytic GLM agrees with spec$mu_loss (value and gradient)", {
     psi <- spec$psi_from_state(problem, state)
     Minv <- normalizing_matrix(problem$Lm_fn, psi, state$beta, problem$design_matrix, state$Q, problem$p)
     cl <- spec$make_clever(problem, step, state, psi, Minv)
-    cl$offset <- spec$fluctuation_offset(problem, step, state)
+    cl$offset <- spec$fluctuation_offset(problem, step, state, linear = linear)
     g <- spec$fluctuation_glm(problem, step, state, cl)
     fam <- fluctuation_family(linear)
 
     for(e in list(rep(0, problem$p), c(0.03, -0.02), c(-0.11, 0.07))) {
       eta <- as.vector(g$offset + g$X %*% e)
-      expect_equal(sum(fam$dev(eta, g$target)), as.numeric(spec$mu_loss(torch::torch_tensor(e), problem, step, state, cl)), tolerance = 1e-4)
+      expect_equal(sum(fam$dev(eta, g$target)), as.numeric(spec$mu_loss(torch::torch_tensor(e), problem, step, state, cl, linear = linear)), tolerance = 1e-4)
       et <- torch::torch_tensor(e, requires_grad = TRUE)
-      ag <- as.numeric(torch::autograd_grad(spec$mu_loss(et, problem, step, state, cl), et)[[1]])
+      ag <- as.numeric(torch::autograd_grad(spec$mu_loss(et, problem, step, state, cl, linear = linear), et)[[1]])
       expect_equal(as.vector(crossprod(g$X, fam$grad(eta, g$target))), ag, tolerance = 1e-4)
     }
   }

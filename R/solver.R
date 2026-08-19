@@ -268,7 +268,7 @@ solve_fluctuation <- function(problem, spec, control, step, state, clever, K_Q) 
   p <- problem$p
 
   obj_torch <- function(epsilon) {
-    target <- spec$mu_loss(epsilon, problem, step, state, clever)
+    target <- spec$mu_loss(epsilon, problem, step, state, clever, control$linear)
 
     if(isTRUE(step$fluctuate_Q)) {
       target <- target - Q_fluctuation(epsilon, K_Q, state$Q)$log()$sum()

@@ -32,12 +32,12 @@ Lhat_theory <- function(it) {
   A + B
 }
 
-bayes_loglik_at <- function(problem, spec, fit, condvar) {
+bayes_loglik_at <- function(problem, spec, fit, condvar, linear) {
   fn <- fit$final
   function(e) {
     st <- spec$apply_update(problem, list(id = 1L, fluctuate_Q = TRUE),
-                            fit$state, e, fn$clever, fn$K_Q)
-    clever_b <- scale_bayes_clever(problem, spec, st, fn$clever)
-    spec$bayes_loglik(e, problem, fit$state, clever_b, st$Q, condvar)
+                            fit$state, e, fn$clever, fn$K_Q, linear = linear)
+    clever_b <- scale_bayes_clever(problem, spec, st, fn$clever, linear = linear)
+    spec$bayes_loglik(e, problem, fit$state, clever_b, st$Q, condvar, linear = linear)
   }
 }

@@ -1,11 +1,10 @@
-msm_spec_cate <- function(tmle_linear = TRUE) {
-  tmle_loss <- if(tmle_linear) {
+msm_spec_cate <- function(tmle_linear = TRUE, bayes_linear = TRUE) {
+  tmle_loss_linear <- {
     f <- torch::nn_mse_loss(reduction = "sum")
     function(x, y) 0.5 * f(x, y)
   }
-  else {
-    torch::nn_bce_with_logits_loss(reduction = "sum")
-  }
+
+  tmle_loss_logistic <- torch::nn_bce_with_logits_loss(reduction = "sum")
 
   fluctuate <- function(mu_col, cc, epsilon) {
     if(tmle_linear) {
@@ -21,7 +20,7 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
     tol = 1e-3,
     nan_guard = TRUE,
     supports_bayes = TRUE,
-    tmle_loss = tmle_loss,
+    #tmle_loss = tmle_loss,
 
     init_state = function(problem) {
       n <- problem$n
@@ -55,9 +54,9 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       )
     },
 
-    fluctuation_offset = function(problem, step, state) {
+    fluctuation_offset = function(problem, step, state, linear) {
       m <- state$mu$obs[, 1]
-      if(tmle_linear) {
+      if(linear) {
         m
       }
       else {
@@ -71,15 +70,16 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
            target = as.numeric(problem$Yt))
     },
 
-    mu_loss = function(epsilon, problem, step, state, clever) {
-      tmle_loss(clever$offset + clever$obs$matmul(epsilon), problem$Yt)
+    mu_loss = function(epsilon, problem, step, state, clever, linear) {
+      p <- clever$offset + clever$obs$matmul(epsilon)
+      if(isTRUE(linear)) tmle_loss_linear(p, problem$Yt) else tmle_loss_logistic(p, problem$Yt)
     },
 
-    apply_update = function(problem, step, state, epsilon, clever, K_Q) {
+    apply_update = function(problem, step, state, epsilon, clever, K_Q, linear) {
       n <- problem$n
 
       fluctuate <- function(col, cc) {
-        if(tmle_linear) {
+        if(isTRUE(linear)) {
           col + cc$matmul(epsilon)
         }
         else {
@@ -104,9 +104,9 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       (problem$aux$H * (problem$Yt - state$mu$obs[, 1]))$reshape(c(problem$n, 1))
     },
 
-    dpsi_depsilon = function(problem, state, clever, epsilon) {
+    dpsi_depsilon = function(problem, state, clever, epsilon, linear) {
       n <- problem$n
-      if(tmle_linear) {
+      if(linear) {
         list(clever$a1 - clever$a0)
       }
       else {
@@ -116,8 +116,8 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       }
     },
 
-    bayes_clever_scale = function(problem, state) {
-      if(tmle_linear == FALSE) return(NULL)
+    bayes_clever_scale = function(problem, state, linear) {
+      if(linear == FALSE) return(NULL)
 
       nu <- problem$nuisance_estimates
       list(
@@ -127,16 +127,16 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
       )
     },
 
-    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar) {
+    bayes_loglik = function(epsilon, problem, state, clever, Q_eps, condvar, linear) {
       logQ <- Q_eps$log()$sum()
-      if(tmle_linear) {
+      if(linear) {
         stopifnot(!is.null(condvar))
         pred <- state$mu$obs[, 1] + clever$obs$matmul(epsilon)
         -((pred - problem$Yt)$pow(2) / (2 * condvar))$sum() - 0.5 * condvar$log()$sum() + logQ
       }
       else {
         lg <- state$mu$obs[, 1]$logit() + clever$obs$matmul(epsilon)
-        -tmle_loss(lg, problem$Yt) + logQ
+        -tmle_loss_logistic(lg, problem$Yt) + logQ
       }
     },
 
@@ -150,9 +150,9 @@ msm_spec_cate <- function(tmle_linear = TRUE) {
           nuisance_field("mu", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu0", n, lower = b$lo, upper = b$hi, severity = "warning"),
           nuisance_field("mu1", n, lower = b$lo, upper = b$hi, severity = "warning"),
-          nuisance_field("condvar", n, required = bayes_enabled && tmle_linear),
-          nuisance_field("condvar0", n, required = bayes_enabled && tmle_linear),
-          nuisance_field("condvar1", n, required = bayes_enabled && tmle_linear)
+          nuisance_field("condvar", n, required = bayes_enabled),
+          nuisance_field("condvar0", n, required = bayes_enabled),
+          nuisance_field("condvar1", n, required = bayes_enabled)
         ),
         checks = list(
           function(nu, problem) {

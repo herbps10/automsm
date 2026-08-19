@@ -84,6 +84,20 @@ B <- function(Lm_fn, psi, design_matrix, Q, p, init = NULL) {
   beta
 }
 
+#' Closed form B(psi, Q) for an affine working model + weighted squared error
+#' @noRd
+B_wls <- function(pre, psi, Q) {
+  w <- rep(as.numeric(Q), times = pre$K) * pre$hrep
+  y <- as.numeric(psi)
+  Xw <- pre$X * w
+  A <- crossprod(pre$X, Xw)
+  ch <- tryCatch(chol(A), error = function(e) NULL)
+  if(is.null(ch) || rcond(A) < 1e-10) return(NULL)  # (degenerate fluctuated Q)
+  list(beta = as.numeric(backsolve(ch, backsolve(ch, crossprod(Xw, y), transpose = TRUE))), A = A, chol = ch)
+}
+
+
+
 #' @noRd
 objective <- function(Lm, psi, beta, design_matrix, Q) {
   dL(Lm, psi, beta, design_matrix, weight = Q)[[1]]
