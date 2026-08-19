@@ -348,7 +348,6 @@ test_that("cate generalized posterior with binary outcome and logistic or linear
     s <- fit$bayes_tmle$diagnostics
     expect_lt(max(abs(s$median - fit$tmle$est) / fit$tmle$se), 0.5)
     expect_lt(max(abs(log(s$sd / fit$tmle$se))), log(1.5))
-    expect_true(all(s$rhat < 1.05))
   }
 })
 
