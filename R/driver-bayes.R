@@ -283,7 +283,7 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
 
   run_chain <- function() {
     adaptMCMC::MCMC(
-      log_dens, n = total, init = as.numeric(final$epsilon),
+      log_dens, n = total, init = as.numeric(final$epsilon) + runif(p, -0.5, 0.5),
       adapt = control$warmup, acc.rate = control$acc_rate, scale = scale
     )
   }

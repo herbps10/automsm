@@ -97,10 +97,9 @@ tmle_control <- function(
 #' @param chains Number of MCMC chains.
 #' @param prior A function taking the numeric vector of working-model coefficients \eqn{\beta}
 #'   (of length \code{p}) and returning a scalar log-density. Defaults to independent standard normals.
-#' @param fluctuation whether to use a linear TMLE fluctuation model (\code{"linear"}, default)
+#' @param fluctuation whether to use a linear TMLE fluctuation model (\code{"linear"})
 #'   a logistic one (\code{"logistic"}), or pick based on the outcome type (\code{"auto"}; continuous outcomes default to
-#'   linear, and binary outcomes logistic). Defaults to \code{"linear"} because the linear fluctuation is more
-#'   robust at small samples sizes for the generalized Bayesian method.
+#'   linear, and binary outcomes logistic). Defaults to \code{"auto"}.
 #' @param scale Initial proposal covariance for the adaptive sampler. If \code{NULL} (the default),
 #'   it is derived from the estimated efficient influence function. Supply a scalar or
 #'   length-\eqn{p} vector of variances, or a \eqn{p \times p} covariance matrix to override the default.
@@ -126,7 +125,7 @@ bayes_control <- function(
     warmup = 1e3,
     chains = 4L,
     prior = function(beta) sum(stats::dnorm(as.numeric(beta), 0, 1, log = TRUE)),
-    fluctuation = c("linear", "logistic", "auto"),
+    fluctuation = c("auto", "linear", "logistic"),
     scale = NULL,
     acc_rate = 0.3,
     eps_max = NULL,
