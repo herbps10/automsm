@@ -115,7 +115,7 @@ bayes_jacobian <- function(problem, psi, Q_base, Q_eps, beta, dpsi_list, epsilon
 #' Returns the list expected by AdaptMCMC: the first element is the
 #' log-density, remaining elements are recorded in `extra.values`
 #' @noRd
-bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior, control = NULL, tally = NULL) {
+bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condvar, prior, beta_init = NULL, control = NULL, tally = NULL) {
   p <- problem$p
 
   reject <- function(reason) {
@@ -138,7 +138,7 @@ bayes_log_density <- function(epsilon, problem, spec, state, clever, K_Q, condva
   if(ess < (control$min_ess %||% 0)) return(reject("low_ess"))
 
   psi <- spec$psi_from_state(problem, st)
-  beta <- B(problem$Lm_fn, psi, problem$design_matrix, st$Q, problem$p)
+  beta <- B(problem$Lm_fn, psi, problem$design_matrix, st$Q, problem$p, init = beta_init)
 
   if(!all(is.finite(as.numeric(beta)))) return(reject("nonfinite_beta"))
 
@@ -175,14 +175,14 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
   support <- resolve_bayes_support(problem, control, final$K_Q, final$epsilon)
   control <- utils::modifyList(control, support[c("eps_max", "min_ess")])
 
-  tally <- new_bayes_tally()
+  beta_init <- as.numeric(fit$state$beta)
 
   tally <- new_bayes_tally()
   eval_density <- function(epsilon, tally_env) {
     bayes_log_density(
       torch::torch_tensor(epsilon), problem, spec, fit$state,
       final$clever, final$K_Q, condvar,
-      prior = control$prior, control = control, tally = tally_env
+      prior = control$prior, control = control, tally = tally_env, beta_init = beta_init
     )
   }
   log_dens <- function(epsilon) eval_density(epsilon, tally)
@@ -212,6 +212,7 @@ run_bayes_tmle <- function(problem, spec, fit, control, eif = NULL) {
   epsilon_samples <- array(NA_real_, dim = c(control$chains, control$draws, p + 1L))
   acc <- numeric(control$chains)
   rej_by_chain <- vector("list", control$chains)
+
 
   run_chain <- function() {
     adaptMCMC::MCMC(

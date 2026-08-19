@@ -37,17 +37,17 @@
 #' @family automsm control
 #' @export
 tmle_control <- function(
-  enabled = TRUE,
-  maxiter = 25L,
-  fluctuation = c("auto", "linear", "logistic"),
-  solver = c("newton", "lbfgs"),
-  criterion = c("eif", "epsilon"),
-  eif_tol = 1e-2,
-  tol = NULL,
-  eps_max = 25,
-  clamp = 1e-3,
-  ridge = 1e-10,
-  obj_tol = 1e-6
+    enabled = TRUE,
+    maxiter = 25L,
+    fluctuation = c("auto", "linear", "logistic"),
+    solver = c("newton", "lbfgs"),
+    criterion = c("eif", "epsilon"),
+    eif_tol = 1e-2,
+    tol = NULL,
+    eps_max = 25,
+    clamp = 1e-3,
+    ridge = 1e-10,
+    obj_tol = 1e-6
 ) {
   fluctuation <- match.arg(fluctuation)
   solver <- match.arg(solver)

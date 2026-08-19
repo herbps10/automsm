@@ -83,22 +83,22 @@
 #'
 #' @export
 longitudinal_dose_response <- function(
-  data,
-  Ls,
-  As,
-  Y,
-  formula,
-  regimes,
-  summary_measures = NULL,
-  outcome_type = "binomial",
-  loss = loss_squared_error,
-  working_model = working_model_linear,
-  p = NULL,
-  nuisance = nuisance_control(),
-  nuisance_estimates = NULL,
-  tmle = tmle_control(),
-  bayes = FALSE,
-  onestep = onestep_control()
+    data,
+    Ls,
+    As,
+    Y,
+    formula,
+    regimes,
+    summary_measures = NULL,
+    outcome_type = "binomial",
+    loss = loss_squared_error,
+    working_model = working_model_linear,
+    p = NULL,
+    nuisance = nuisance_control(),
+    nuisance_estimates = NULL,
+    tmle = tmle_control(),
+    bayes = FALSE,
+    onestep = onestep_control()
 ) {
   nuisance <- as_nuisance_control(nuisance)
   tmle <- resolve_fluctuation(as_tmle_control(tmle), outcome_type)

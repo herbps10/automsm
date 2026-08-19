@@ -37,8 +37,8 @@ test_that("cate continous binary one-step fixture is stable", {
     nuisance_estimates = fx$nuisance_estimates
   )
 
-  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-6)
-  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-6)
+  expect_equal(fit$plugin$est, fx$fit_onestep$plugin$est, tolerance = 1e-5)
+  expect_equal(fit$onestep$est, fx$fit_onestep$onestep$est, tolerance = 1e-5)
   expect_equal(fit$onestep$se, fx$fit_onestep$onestep$se, tolerance = 1e-5)
 })
 

@@ -67,9 +67,10 @@ grad_dL <- function(Lm, t, beta, X) {
 
 #' @importFrom torch optim_lbfgs torch_tensor
 #' @noRd
-B <- function(Lm_fn, psi, design_matrix, Q, p) {
-  beta <- torch_tensor(rep(0, p), requires_grad = TRUE)
-  optimizer <- torch::optim_lbfgs(beta)
+B <- function(Lm_fn, psi, design_matrix, Q, p, init = NULL) {
+  if(is.null(init)) init <- rep(0, p)
+  beta <- torch_tensor(init, requires_grad = TRUE)
+  optimizer <- torch::optim_lbfgs(beta, line_search_fn = "strong_wolfe")
   for (iter in 1:2) {
     optimizer$step(function() {
       optimizer$zero_grad()

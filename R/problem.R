@@ -56,7 +56,7 @@ validate_design_conditioning <- function(design_matrix, terms, d, error_kappa = 
   if(length(zero)) {
     stop("Working-model design column(s) ", paste(zero, collapse = ", "),
          " (", paste(terms[zero], collapse = ", "), ") are identically zero. ",
-    call. = FALSE)
+         call. = FALSE)
   }
 
   k <- kappa(crossprod(X), exact = TRUE)
