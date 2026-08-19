@@ -5,7 +5,7 @@
 
 source(test_path("helper-invariants.R"))
 source(test_path("helper-bayes.R"))
-source(test_path("test-internals.R"))
+source(test_path("helper-internals.R"))
 
 
 # ----- Kernel invariants -----
