@@ -75,10 +75,11 @@ B <- function(Lm_fn, psi, design_matrix, Q, p, init = NULL) {
     optimizer$step(function() {
       optimizer$zero_grad()
       value <- Lm_fn(psi, beta, design_matrix)$mul(Q)$sum()
-      value$backward(retain_graph = TRUE)
+      value$backward()
       value
     })
     optimizer$zero_grad()
+    if (max(abs(as.numeric(beta$grad))) < 1e-8) break
   }
   beta
 }
