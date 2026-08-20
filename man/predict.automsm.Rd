@@ -4,29 +4,46 @@
 \alias{predict.automsm}
 \title{Predict from a "automsm" object}
 \usage{
-\method{predict}{automsm}(object, newdata, estimator = "tmle", type = "point", ...)
+\method{predict}{automsm}(
+  object,
+  newdata,
+  estimator = c("tmle", "onestep", "bayes"),
+  type = c("point", "joint", "rvar"),
+  ndraws = NULL,
+  seed = NULL,
+  ...
+)
 }
 \arguments{
 \item{object}{An object of class \code{"automsm"}.}
 
-\item{newdata}{A data frame of new data.}
+\item{newdata}{A data frame containing the variables referenced by the working-model formula.
+For \code{longitudinal_dose_response} fits that used \code{summary_measures}, this
+includes the regime-level summary columns.}
 
 \item{estimator}{Which estimator to use for predictions:
-\code{"onestep"}, \code{"bayes"},
-or \code{"tmle"} (default). Note that the \code{"bayes"} estimator
-is not available for the \code{"longitudinal_dose_response"} estimand.}
+\code{"tmle"} (default), \code{"onestep"}, or \code{"bayes"}.}
 
-\item{type}{Type of prediction; \code{"point"} for point estimates,
-\code{"joint"} for draws from joint distribution.}
+\item{type}{\code{"point"} for a vector of point predictions;
+\code{"joint"} for an \code{ndraws} by \code{nrow(newdata)} matrix of draws;
+\code{"rvar"} for a \pkg{posterior} \code{rvar} of length \code{nrow(ndata)}.}
+
+\item{ndraws}{Number of draws for \code{type="joint"} or \code{"rvar"}. For
+\code{estimator = "bayes"}, this subsamples the posterior and is ignored if it exceeds
+the number of available draws.}
+
+\item{seed}{Optional integer seed for the frequentist normal-approximation draws.
+Ignored for \code{estimtaor = "bayes"}, whose draws are already fixed by the fit.}
 
 \item{...}{Additional arguments (not currently used).}
 }
 \value{
-For predictions of type \code{"point"}, a vector of predictions is
-returned. For predictions of type \code{"joint"}, a list is returned, where
-each element is a vector of predictions for the corresponding row of
-\code{newdata}
+A numeric vector (\code{"point"}), a numeric matrix with draws in
+rows (\code{"joint"}), or a \code{posterior::rvar} (\code{"rvar"}).
 }
 \description{
-Evaluates the fitted working model at supplied design points.
+Evaluates the fitted working model \eqn{m_\beta} at supplied design points.
+}
+\seealso{
+\link{automsm}, \code{\link[posterior:rvar]{posterior::rvar()}}
 }

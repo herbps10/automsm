@@ -150,7 +150,7 @@ each row of the new data, a vector of draws from the joint sampling distribution
 of the working-model predictions; we summarize these draws by their 2.5% and
 97.5% quantiles to form pointwise 95% intervals.
 ```{r}
-pred$ci <- predict(fit, pred, type = "joint")
+pred$ci <- predict(fit, pred, type = "rvar")
 pred$lower <- purrr::map_dbl(pred$ci, quantile, 0.025)
 pred$upper <- purrr::map_dbl(pred$ci, quantile, 0.975)
 
@@ -158,7 +158,7 @@ ggplot(pred, aes(X2, point, color = "TMLE Estimate")) +
   geom_line() +
   geom_line(aes(y = lower), lty = 2) +
   geom_line(aes(y = upper), lty = 2) +
-  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True"))
+  geom_function(fun = function(x) sin(2 * pi * x), aes(color = "True")) +
   ylab("Treatment Effect") +
   labs(color = NULL) +
   theme(legend.position = "bottom")
@@ -215,7 +215,7 @@ And now plot the resulting predictions:
 ```{r}
 pred_splines <- data.frame(X2 = seq(0, 1, 0.01))
 pred_splines$point <- predict(fit_splines, pred_splines)
-pred_splines$ci <- predict(fit_splines, pred_splines, type = "joint")
+pred_splines$ci <- predict(fit_splines, pred_splines, type = "rvar")
 pred_splines$lower <- purrr::map_dbl(pred_splines$ci, quantile, 0.025)
 pred_splines$upper <- purrr::map_dbl(pred_splines$ci, quantile, 0.975)
 
